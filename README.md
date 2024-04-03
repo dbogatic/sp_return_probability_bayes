@@ -1,5 +1,5 @@
 # Quarterly S&P 500 Return Probabilities: A Bayesian Approach
-
+![DALLE Markov Sampling](./resources/DALLE_Markov_Sampling.webp)
 ## Summary
 This Python script leverages **PyMC 5.10** and **ArviZ** to forecast the probabilities of quarterly S&P 500 returns falling within specific ranges using a Bayesian Linear Regression model with Student's t-distribution errors. Developed with the assistance of **Chat GPT** and **GitHub Copilot**, it marries Bayesian statistical methods with advanced visualization techniques to provide insightful forecasts on financial market trends.
 
