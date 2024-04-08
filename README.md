@@ -20,6 +20,11 @@ This Python script leverages **PyMC 5.10** and **ArviZ** to forecast the probabi
 - Splits the data into training and testing sets, applying RobustScaler to mitigate outlier impacts.
 - Utilizes robust scaling to ensure model accuracy and resilience.
 
+### Prior Predictive Checks
+
+- Performs prior predictive checks to assess the influence of priors on the resulting model and ensure they are not overly restrictive or too broad.
+- Ensures that the specified priors allow for a reasonable range of outcomes, particularly for the heavy-tailed nature of financial returns.
+
 ### Bayesian Modeling and Iterative Prediction
 
 - Employs a Bayesian Linear Regression model with Student's t-distribution errors, specifying priors and utilizing MCMC sampling for posterior estimation.
@@ -30,11 +35,6 @@ This Python script leverages **PyMC 5.10** and **ArviZ** to forecast the probabi
 
 - Visualizes MCMC trace plots and posterior predictive distributions for model transparency.
 - Compares model predictions against actual returns to assess forecast accuracy.
-
-### Prior Predictive Checks
-
-- Performs prior predictive checks to assess the influence of priors on the resulting model and ensure they are not overly restrictive or too broad.
-- Ensures that the specified priors allow for a reasonable range of outcomes, particularly for the heavy-tailed nature of financial returns.
 
 ### Results Compilation and Analysis
 
