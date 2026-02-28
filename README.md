@@ -1,10 +1,15 @@
-# Quarterly S&P 500 Return Probabilities: A Bayesian Approach
+# Quarterly S&P 500 Return Probabilities: A Hierarchical Bayesian Approach
 
 ![DALLE Markov Sampling](./resources/DALLE_Markov_Sampling.webp)
 
 ## Summary
 
-This Python script leverages **PyMC 5.10** and **ArviZ** to forecast the probabilities of quarterly S&P 500 returns falling within specific ranges using a Bayesian Linear Regression model. Developed with the assistance of **Chat GPT** and **GitHub Copilot**, it marries Bayesian statistical methods with advanced visualization techniques to provide insightful forecasts on financial market trends.
+This Jupyter notebook leverages **PyMC 5.10** and **ArviZ** to forecast the probabilities of quarterly S&P 500 returns falling within specific ranges. It implements two complementary Bayesian models:
+
+1. **Flat Bayesian Linear Regression** — a single set of parameters with Student's t-distribution errors, serving as the baseline.
+2. **Hierarchical Bayesian Model** — a three-level partial-pooling model that classifies each quarter into a VIX-based market regime and learns regime-specific coefficients, while sharing information across regimes via global hyperpriors.
+
+Developed with the assistance of **Chat GPT**, **GitHub Copilot**, and **Claude (Anthropic)**, the notebook marries Bayesian statistical methods with advanced visualization techniques to provide insightful forecasts on financial market trends.
 
 ## Key Components
 
@@ -25,11 +30,25 @@ This Python script leverages **PyMC 5.10** and **ArviZ** to forecast the probabi
 - Performs prior predictive checks to assess the influence of priors on the resulting model and ensure they are not overly restrictive or too broad.
 - Ensures that the specified priors allow for a reasonable range of outcomes, particularly for the heavy-tailed nature of financial returns.
 
-### Bayesian Modeling and Iterative Prediction
+### Flat Bayesian Model and Iterative Prediction
 
 - Employs a Bayesian Linear Regression model with Student's t-distribution errors, specifying priors and utilizing MCMC sampling for posterior estimation.
 - Refines predictions each quarter by updating the model with new data, improving forecast precision over time.
 - Calculates predictive probabilities for specified ranges of S&P 500 returns, offering actionable insights.
+
+### Hierarchical Bayesian Model
+
+- Classifies each quarter into one of three **VIX-based market regimes**:
+  - **Regime 0** — Low Volatility (VIX < 15): calm bull-market environment
+  - **Regime 1** — Normal Volatility (15 ≤ VIX < 25): typical market conditions
+  - **Regime 2** — High Volatility (VIX ≥ 25): stress / crisis environment
+- Implements a **three-level hierarchy** with partial pooling:
+  - *Level 2*: Global hyperpriors (`mu_*`, `sigma_*`) learned from the data control how much information is shared across regimes.
+  - *Level 1*: Regime-specific parameters (`alpha_r`, `beta_vix_r`, `beta_rates_r`, `beta_sp_r`) drawn from the hyperpriors — each regime gets its own coefficients while still borrowing strength from the others.
+  - *Level 0*: StudentT observation likelihood using the regime-appropriate mean.
+- Uses **non-centered parameterization** to prevent NUTS sampling funnels and reduce divergences.
+- Visualizes regime-specific coefficient posteriors (bar plots, forest plots) and hyperprior posteriors to show the learned degree of pooling.
+- Runs the same expanding-window iterative prediction loop as the flat model, with regime indices passed at each step for comparison.
 
 ### Visualization and Performance Evaluation
 
@@ -43,14 +62,16 @@ This Python script leverages **PyMC 5.10** and **ArviZ** to forecast the probabi
 
 ## Modeling Trade-offs and Future Plans
 
-This initial model, tailored to illustrate the Bayesian approach, has been crafted with careful consideration of the historical outliers and heavy-tailed nature of financial returns observed in the period 2000-2024. Given the significant outliers, priors were refined to accommodate heavy tails, providing a more conservative fit that reduces the influence of extreme events on our predictions.
+Both models are tailored to illustrate Bayesian approaches to financial forecasting and have been crafted with careful consideration of the historical outliers and heavy-tailed nature of financial returns observed in the period 2000–2024. They are more for demonstration than reliance on predicting exact return ranges.
 
-However, this model is more for demonstration than reliance on predicting exact return ranges. To enhance its practical application, further refinements are necessary for it to capture the true nature of the dataset's tail behavior. This includes:
-- Expanding the priors to embrace a wider array of plausible scenarios.
-- Incorporating additional data or alternative modeling techniques for tail events.
-- Continual model evaluation against new data to adapt to evolving market conditions.
+The hierarchical model improves on the flat baseline by allowing the data to express regime-specific dynamics, but several further refinements are possible:
 
-In conclusion, while this model provides a solid foundation, it represents the starting point for an iterative process of model improvement. The next steps will involve more sophisticated modeling of the tail risks to accurately capture the probabilities of extreme financial outcomes, thus ensuring the model's applicability to realistic investment and risk management scenarios.
+- **Regime-specific error variance** (`sigma_h` per regime) to capture volatility clustering within each environment.
+- **Regime-specific degrees of freedom** (`nu_h` per regime) for heavier tails during crisis periods.
+- **Time-varying coefficients** — a Gaussian random walk prior on the betas to capture structural breaks over time (state-space model).
+- **Hidden Markov / mixture model** — treat regime membership as a latent variable and jointly infer regime transitions and return distributions, rather than using hard VIX thresholds.
+- **Expanding the feature set** — yield curve slope, credit spreads, or earnings yield as additional predictors.
+- **Continual model evaluation** against new quarterly data as it becomes available.
 
 ## Sources
 
