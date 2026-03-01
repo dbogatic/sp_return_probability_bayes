@@ -114,17 +114,13 @@ alpha, beta_* ~ Normal(0, sigma=0.05)
 
 Features are RobustScaler-standardized (centered at median, scaled by IQR),
 so a coefficient of 0.05 corresponds to a 5% change in log return per IQR
-of the feature — a reasonable upper bound on macro predictability.
+of the feature — a reasonable upper bound on macro predictability. The prior
+is wide enough for the data to dominate the posterior without being so diffuse
+that it contributes no regularisation at all.
 
-We deliberately chose `sigma=0.05` (not tighter). A previous version used
-`sigma=0.01`, which caused **prior dominance**: the posterior barely moved from
-the prior mean regardless of the data, effectively turning the Bayesian model
-into a heavily regularized regression with no meaningful learning.
-
-The test: after fitting, do the posterior credible intervals exclude zero for
-any coefficient? If so, the data found a signal. If not, the prior is not the
-reason — the features simply have limited predictive power at quarterly
-frequency, which is itself a finding.
+If the posterior credible intervals exclude zero for a coefficient, the data
+found a signal. If not, the features simply have limited predictive power at
+quarterly frequency — which is itself a finding worth reporting.
 
 ### 7. Observation scale prior
 
@@ -191,16 +187,11 @@ scale and allows efficient sampling throughout the posterior.
 ### 11. Prior predictive checks
 
 Before touching observed data, we verify that the priors generate plausible
-quarterly return distributions. We display the full prior predictive
-distribution (no clipping) and use `xlim=±50%` for readability, separately
-reporting the fraction of draws that fall outside this window.
+quarterly return distributions. The plot uses `xlim=±50%` for readability and
+separately reports the fraction of draws that fall outside this window — so
+the full distribution is visible and quantified, not hidden.
 
-**Why no clipping?** Clipping before the plot hides how much probability the
-prior assigns to extreme outcomes — it makes a pathological prior look
-reasonable. The correct response to implausible prior predictive values is to
-fix the priors, not suppress the evidence.
-
-### 12. Empirical CDF for probabilities — not parametric approximation
+### 12. Empirical CDF for probabilities
 
 Predicted probabilities for each bucket are computed directly from the
 posterior predictive samples:
@@ -209,12 +200,10 @@ posterior predictive samples:
 prob_above_5 = np.mean(post_samples > 0.05)
 ```
 
-A previous version used `scipy.stats.t.cdf` parameterized by the empirical
-mean and standard deviation of the posterior predictive samples. This is
-incorrect: the posterior predictive is a **mixture** of Student-t distributions
-(one per posterior draw of the parameters), not a single t. Using empirical
-moments of the mixture to parameterize a single t introduces bias. The direct
-empirical CDF is exact and requires no distributional assumptions.
+The posterior predictive is a **mixture** of Student-t distributions — one per
+posterior draw of the parameters. Computing probabilities from the sample
+empirical CDF is exact and makes no distributional assumptions about the shape
+of the mixture.
 
 ### 13. Walk-forward expanding-window validation
 
