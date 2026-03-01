@@ -14,10 +14,9 @@ quarterly S&P 500 returns will fall within four buckets:
 | Mild negative | −5% to 0% | −4.9% to 0% |
 | Strong negative | < −5% | < −4.9% |
 
-Two models are implemented and compared using a **28-quarter out-of-sample
-walk-forward test (2017 Q1 – 2024 Q1)**, spanning a full market cycle
-including the 2018 correction, the COVID crash and recovery, the 2022 bear
-market, and the 2023 recovery.
+Two models are implemented and compared using a **21-quarter out-of-sample
+walk-forward test (2019 Q1 – 2024 Q1)**, spanning a full market cycle
+including the COVID crash, the 2022 bear market, and the 2023 recovery.
 
 1. **Flat Bayesian Linear Regression** — a single set of parameters, Student-t
    likelihood, serving as the baseline.
@@ -210,15 +209,26 @@ of the mixture.
 The model is evaluated using a strict expanding-window walk-forward approach:
 
 1. Train on data up to quarter *t* only.
-2. Refit the RobustScaler on the current training window (prevents future-data
-   leakage into the scaling transformation).
+2. Refit the RobustScaler on the current training window — prevents future-data
+   leakage into the scaling transformation.
 3. Sample the posterior on training data.
 4. Set features to the test quarter *t+1* and sample posterior predictive —
-   this is the out-of-sample prediction.
+   the true out-of-sample prediction.
 5. Add quarter *t+1* to the training set and repeat.
 
-The test period covers **28 quarters (2017 Q1 – 2024 Q1)**, providing
-meaningful statistical power for model comparison (original: 5 quarters).
+**Train/test split: `train_end_year = 2018`** (~73 training quarters,
+21 test quarters: 2019 Q1 – 2024 Q1).
+
+The split year was chosen to balance two competing constraints. The dataset
+contains ~94 usable quarters, with the High VIX regime (lagged VIX ≥ 25)
+accounting for only 21 of them. Cutting earlier (e.g. 2016) leaves the High
+VIX regime with ~12–14 training quarters — so sparse that the hierarchical
+model's partial pooling carries almost all the weight and the regime-specific
+parameters are barely identified by data. Cutting at 2018 gives the High VIX
+regime ~16–18 training quarters (adding the 2018 Q4 volatility spike), while
+still leaving a 21-quarter test period that covers the COVID crash (2020 Q1),
+the low-volatility 2021 bull run, the 2022 inflation-driven bear market, and
+the 2023–2024 recovery — a genuine stress test across all three regimes.
 
 ---
 
