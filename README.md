@@ -54,12 +54,16 @@ Monthly data is resampled to quarters. The rationale:
 
 ### 3. Features — lagged by one quarter
 
-Three features, all lagged one quarter so they are known at prediction time:
+Six features, all lagged one quarter so they are fully known at prediction time.
+Yield curve and HY spread are sourced from FRED (`T10Y2Y`, `BAMLH0A0HYM2`).
 
 | Feature | Transformation | Rationale |
 |---|---|---|
-| `VIX_lag1` | Log change in VIX | Volatility regime signal |
-| `interest_rates_lag1` | Log change in interest rates | Macro policy signal |
+| `yield_curve_lag1` | Previous quarter-end 10Y–2Y spread (raw level) | Forward-looking macro regime signal; inverted curve precedes recessions |
+| `yield_curve_chg_lag1` | Quarter-over-quarter change in 10Y–2Y spread | Momentum in yield curve steepening / flattening |
+| `hy_spread_lag1` | Log change in HY OAS spread | Credit-risk appetite signal; widens ahead of equity drawdowns |
+| `hy_spread_chg_lag1` | Quarter-over-quarter log change in HY OAS | Spread momentum — rapidly widening spreads signal risk-off |
+| `VIX_lag1` | Log change in VIX | Volatility momentum (reactive, not predictive — retained as feature, not regime classifier) |
 | `sp_returns_lag1` | Log return of S&P 500 | Momentum / mean-reversion |
 
 Lagging is a strict requirement: using same-quarter features would constitute
@@ -100,10 +104,10 @@ genuinely heavy. The Exponential shift puts the bulk of the prior in the
 [4, 30] range, consistent with empirical estimates in the financial
 econometrics literature.
 
-In the hierarchical model, `nu` is **regime-specific** — the high-VIX regime
-is expected to learn a lower `nu` (heavier tails) than the calm regime,
-capturing the empirical finding that tail risk is not constant across market
-environments.
+In the hierarchical model, `nu` is **regime-specific** — the recessionary
+regime is expected to learn a lower `nu` (heavier tails) than the expansionary
+regime, capturing the empirical finding that tail risk is not constant across
+market environments.
 
 ### 6. Prior on regression coefficients — weakly informative
 
@@ -131,27 +135,37 @@ sigma_h ~ HalfNormal(sigma=0.06, shape=n_regimes)  # hierarchical, per-regime
 HalfNormal places most mass near small positive values. The scale parameter
 (0.05–0.06) is calibrated to observed quarterly S&P 500 log-return volatility
 (historically ~7–8%). In the hierarchical model, each regime has its own
-`sigma_h`: the high-VIX regime is expected to learn a larger scale, capturing
-**volatility clustering** — the well-documented empirical pattern that
-high-volatility periods cluster together.
+`sigma_h`: the recessionary regime is expected to learn a larger scale,
+capturing **volatility clustering** — the well-documented empirical pattern
+that high-volatility periods cluster together.
 
-### 8. VIX-based market regimes — lagged, not contemporaneous
+### 8. Yield-curve-based market regimes — lagged, not contemporaneous
 
 The hierarchical model classifies each quarter into one of three regimes based
-on **the previous quarter's VIX level** (not the current quarter's):
+on **the previous quarter's 10Y–2Y yield curve spread** (not the current
+quarter's):
 
-| Regime | Lagged VIX | Market environment |
+| Regime | Lagged 10Y–2Y spread | Market environment |
 |---|---|---|
-| 0 — Low volatility | < 15 | Calm bull market |
-| 1 — Normal volatility | 15 – 25 | Typical conditions |
-| 2 — High volatility | ≥ 25 | Stress / crisis |
+| 0 — Recessionary | < 0% (inverted) | Credit stress, elevated recession risk |
+| 1 — Transitional | 0% – 1% | Flattening or early steepening cycle |
+| 2 — Expansionary | ≥ 1% (normal) | Healthy credit conditions, expansion |
 
-**Why lagged?** Using contemporaneous VIX is look-ahead bias: when predicting
-Q1 2020 returns, we do not know that VIX will spike to 80 during that quarter
-— that information only becomes available as the quarter unfolds. The previous
-quarter's VIX level is fully known before the quarter begins.
+**Why the yield curve, not VIX?** VIX is a reactive signal — it spikes *during*
+crises, not before them. Predicting a quarter's returns using the same quarter's
+VIX spike is look-ahead bias. The yield curve is a *forward-looking* signal:
+an inverted 10Y–2Y spread has preceded every US recession since 1955, typically
+leading by 6–18 months. It is also fully observable at the start of the quarter.
 
-The hard thresholds (15, 25) are fixed domain knowledge, not learned. A future
+VIX is retained as a regression feature (`VIX_lag1`) to capture volatility
+momentum effects, but the regime classifier is the yield curve.
+
+**Why lagged?** The regime is determined by the *previous quarter's* spread —
+fully known before the quarter under prediction begins. Using the current
+quarter's spread would leak information about events that unfold during the
+quarter.
+
+The hard thresholds (0%, 1%) are fixed domain knowledge, not learned. A future
 extension would treat regime membership as a latent variable and learn the
 thresholds jointly (Hidden Markov Model).
 
