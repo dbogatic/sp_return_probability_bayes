@@ -2,78 +2,287 @@
 
 ![DALLE Markov Sampling](./resources/DALLE_Markov_Sampling.webp)
 
-## Summary
+## Overview
 
-This Jupyter notebook leverages **PyMC 5.10** and **ArviZ** to forecast the probabilities of quarterly S&P 500 returns falling within specific ranges. It implements two complementary Bayesian models:
+This notebook uses **PyMC 5.10** and **ArviZ** to estimate the probability that
+quarterly S&P 500 returns will fall within four buckets:
 
-1. **Flat Bayesian Linear Regression** — a single set of parameters with Student's t-distribution errors, serving as the baseline.
-2. **Hierarchical Bayesian Model** — a three-level partial-pooling model that classifies each quarter into a VIX-based market regime and learns regime-specific coefficients, while sharing information across regimes via global hyperpriors.
+| Bucket | Log-return range | Approx. simple return |
+|---|---|---|
+| Strong positive | > +5% | > +5.1% |
+| Mild positive | 0% to +5% | 0% to +5.1% |
+| Mild negative | −5% to 0% | −4.9% to 0% |
+| Strong negative | < −5% | < −4.9% |
 
-Developed with the assistance of **Chat GPT**, **GitHub Copilot**, and **Claude (Anthropic)**, the notebook marries Bayesian statistical methods with advanced visualization techniques to provide insightful forecasts on financial market trends.
+Two models are implemented and compared using a **28-quarter out-of-sample
+walk-forward test (2017 Q1 – 2024 Q1)**, spanning a full market cycle
+including the 2018 correction, the COVID crash and recovery, the 2022 bear
+market, and the 2023 recovery.
 
-## Key Components
+1. **Flat Bayesian Linear Regression** — a single set of parameters, Student-t
+   likelihood, serving as the baseline.
+2. **Hierarchical Bayesian Model** — three-level partial-pooling model with
+   VIX-based market regimes, regime-specific coefficients, and regime-specific
+   tail/scale parameters.
 
-### Data Preparation and Analysis
+---
 
-- Loads and processes monthly data on the S&P 500, VIX, and interest rates, converting it to a quarterly format.
-- Calculates logarithmic returns for the S&P 500, along with changes in the VIX and interest rates.
-- Introduces lagged features to enhance forecast accuracy by incorporating historical data.
+## Modeling Assumptions
 
-### Feature Engineering and Model Training
+Every modeling decision is deliberate. This section documents what was chosen,
+what was rejected, and why.
 
-- Selects influential features for modeling S&P 500 returns.
-- Splits the data into training and testing sets, applying RobustScaler to mitigate outlier impacts.
-- Utilizes robust scaling to ensure model accuracy and resilience.
+### 1. Log returns, not simple returns
 
-### Prior Predictive Checks
+We model log returns `ln(P_t / P_{t-1})` rather than simple percentage returns.
 
-- Performs prior predictive checks to assess the influence of priors on the resulting model and ensure they are not overly restrictive or too broad.
-- Ensures that the specified priors allow for a reasonable range of outcomes, particularly for the heavy-tailed nature of financial returns.
+- Log returns are time-additive: a multi-period log return is the sum of
+  single-period log returns.
+- They produce a more symmetric distribution, which is easier to model.
+- Converting back to simple returns for interpretation is straightforward:
+  `simple_return = exp(log_return) − 1`.
 
-### Flat Bayesian Model and Iterative Prediction
+### 2. Quarterly frequency
 
-- Employs a Bayesian Linear Regression model with Student's t-distribution errors, specifying priors and utilizing MCMC sampling for posterior estimation.
-- Refines predictions each quarter by updating the model with new data, improving forecast precision over time.
-- Calculates predictive probabilities for specified ranges of S&P 500 returns, offering actionable insights.
+Monthly data is resampled to quarters. The rationale:
 
-### Hierarchical Bayesian Model
+- Macro variables (VIX, interest rates) have stronger predictive signal over
+  multi-month horizons; monthly noise is reduced.
+- Quarterly is the natural unit for institutional reporting and portfolio
+  rebalancing decisions.
+- With ~24 years of data (2000–2024), quarterly frequency gives ~95 usable
+  observations — reasonable for Bayesian estimation.
 
-- Classifies each quarter into one of three **VIX-based market regimes**:
-  - **Regime 0** — Low Volatility (VIX < 15): calm bull-market environment
-  - **Regime 1** — Normal Volatility (15 ≤ VIX < 25): typical market conditions
-  - **Regime 2** — High Volatility (VIX ≥ 25): stress / crisis environment
-- Implements a **three-level hierarchy** with partial pooling:
-  - *Level 2*: Global hyperpriors (`mu_*`, `sigma_*`) learned from the data control how much information is shared across regimes.
-  - *Level 1*: Regime-specific parameters (`alpha_r`, `beta_vix_r`, `beta_rates_r`, `beta_sp_r`) drawn from the hyperpriors — each regime gets its own coefficients while still borrowing strength from the others.
-  - *Level 0*: StudentT observation likelihood using the regime-appropriate mean.
-- Uses **non-centered parameterization** to prevent NUTS sampling funnels and reduce divergences.
-- Visualizes regime-specific coefficient posteriors (bar plots, forest plots) and hyperprior posteriors to show the learned degree of pooling.
-- Runs the same expanding-window iterative prediction loop as the flat model, with regime indices passed at each step for comparison.
+### 3. Features — lagged by one quarter
 
-### Visualization and Performance Evaluation
+Three features, all lagged one quarter so they are known at prediction time:
 
-- Visualizes MCMC trace plots and posterior predictive distributions for model transparency.
-- Compares model predictions against actual returns to assess forecast accuracy.
+| Feature | Transformation | Rationale |
+|---|---|---|
+| `VIX_lag1` | Log change in VIX | Volatility regime signal |
+| `interest_rates_lag1` | Log change in interest rates | Macro policy signal |
+| `sp_returns_lag1` | Log return of S&P 500 | Momentum / mean-reversion |
 
-### Results Compilation and Analysis
+Lagging is a strict requirement: using same-quarter features would constitute
+look-ahead bias and overstate out-of-sample accuracy.
 
-- Compiles predicted probabilities and actual returns for comprehensive performance analysis.
-- Implements a function to evaluate the model's predictive effectiveness based on the highest probability ranges.
+### 4. Student-t likelihood — not Normal
 
-## Modeling Trade-offs and Future Plans
+Financial returns have **fat tails**. Black Monday 1987 (Dow −22.6% in one day)
+is a ~20-sigma event under normality — a probability so small it should never
+have occurred in the history of the universe. It happened. Goldman Sachs's risk
+team famously observed "25-sigma events, several days in a row" in August 2007.
 
-Both models are tailored to illustrate Bayesian approaches to financial forecasting and have been crafted with careful consideration of the historical outliers and heavy-tailed nature of financial returns observed in the period 2000–2024. They are more for demonstration than reliance on predicting exact return ranges.
+The **Student-t distribution** with degrees of freedom `nu` accommodates this:
+lower `nu` → heavier tails → more probability mass on extreme events. This is
+the statistically correct model for equity returns.
 
-The hierarchical model improves on the flat baseline by allowing the data to express regime-specific dynamics, but several further refinements are possible:
+### 5. Degrees-of-freedom prior — floor at nu = 4
 
-- **Regime-specific error variance** (`sigma_h` per regime) to capture volatility clustering within each environment.
-- **Regime-specific degrees of freedom** (`nu_h` per regime) for heavier tails during crisis periods.
-- **Time-varying coefficients** — a Gaussian random walk prior on the betas to capture structural breaks over time (state-space model).
-- **Hidden Markov / mixture model** — treat regime membership as a latent variable and jointly infer regime transitions and return distributions, rather than using hard VIX thresholds.
-- **Expanding the feature set** — yield curve slope, credit spreads, or earnings yield as additional predictors.
-- **Continual model evaluation** against new quarterly data as it becomes available.
+The prior on `nu` is:
 
-## Sources
+```
+nu ~ Exponential(lam=1/20) + 4
+```
 
-- Martin, Osvaldo. *Bayesian Analysis with Python: A practical guide to probabilistic modeling*. 3rd Edition, Kindle Edition.
-- Kanungo, Deepak K. *Probabilistic Machine Learning for Finance and Investing*. 1st Edition, Kindle Edition.
+The **floor at 4** is a deliberate modeling constraint. Here is the rationale:
+
+| nu range | Consequence | Assessment |
+|---|---|---|
+| nu < 2 | Infinite variance | Statistically pathological; rejected |
+| 2 ≤ nu < 4 | Infinite kurtosis | Implies extreme events every few quarters — too aggressive even for financial markets |
+| 4 ≤ nu ≤ 15 | Finite variance and kurtosis, heavy tails | Consistent with empirical estimates for quarterly equity returns |
+| nu > 30 | Approaches Normal distribution | Appropriate for calm regimes |
+
+The tension we are resolving: black swans are real and happen more often than
+the Normal distribution implies — but they still should not happen *every few
+quarters*. The floor at 4 encodes that constraint while keeping the tails
+genuinely heavy. The Exponential shift puts the bulk of the prior in the
+[4, 30] range, consistent with empirical estimates in the financial
+econometrics literature.
+
+In the hierarchical model, `nu` is **regime-specific** — the high-VIX regime
+is expected to learn a lower `nu` (heavier tails) than the calm regime,
+capturing the empirical finding that tail risk is not constant across market
+environments.
+
+### 6. Prior on regression coefficients — weakly informative
+
+```
+alpha, beta_* ~ Normal(0, sigma=0.05)
+```
+
+Features are RobustScaler-standardized (centered at median, scaled by IQR),
+so a coefficient of 0.05 corresponds to a 5% change in log return per IQR
+of the feature — a reasonable upper bound on macro predictability.
+
+We deliberately chose `sigma=0.05` (not tighter). A previous version used
+`sigma=0.01`, which caused **prior dominance**: the posterior barely moved from
+the prior mean regardless of the data, effectively turning the Bayesian model
+into a heavily regularized regression with no meaningful learning.
+
+The test: after fitting, do the posterior credible intervals exclude zero for
+any coefficient? If so, the data found a signal. If not, the prior is not the
+reason — the features simply have limited predictive power at quarterly
+frequency, which is itself a finding.
+
+### 7. Observation scale prior
+
+```
+sigma ~ HalfNormal(sigma=0.05)    # flat model
+sigma_h ~ HalfNormal(sigma=0.06, shape=n_regimes)  # hierarchical, per-regime
+```
+
+HalfNormal places most mass near small positive values. The scale parameter
+(0.05–0.06) is calibrated to observed quarterly S&P 500 log-return volatility
+(historically ~7–8%). In the hierarchical model, each regime has its own
+`sigma_h`: the high-VIX regime is expected to learn a larger scale, capturing
+**volatility clustering** — the well-documented empirical pattern that
+high-volatility periods cluster together.
+
+### 8. VIX-based market regimes — lagged, not contemporaneous
+
+The hierarchical model classifies each quarter into one of three regimes based
+on **the previous quarter's VIX level** (not the current quarter's):
+
+| Regime | Lagged VIX | Market environment |
+|---|---|---|
+| 0 — Low volatility | < 15 | Calm bull market |
+| 1 — Normal volatility | 15 – 25 | Typical conditions |
+| 2 — High volatility | ≥ 25 | Stress / crisis |
+
+**Why lagged?** Using contemporaneous VIX is look-ahead bias: when predicting
+Q1 2020 returns, we do not know that VIX will spike to 80 during that quarter
+— that information only becomes available as the quarter unfolds. The previous
+quarter's VIX level is fully known before the quarter begins.
+
+The hard thresholds (15, 25) are fixed domain knowledge, not learned. A future
+extension would treat regime membership as a latent variable and learn the
+thresholds jointly (Hidden Markov Model).
+
+### 9. Partial pooling (hierarchical model)
+
+The hierarchical model sits between two extremes:
+
+| Approach | Description | Problem |
+|---|---|---|
+| Complete pooling | One parameter set for all regimes | Ignores regime differences |
+| No pooling | Separate model per regime | Too little data per regime (~20–40 quarters) |
+| **Partial pooling** | Regime params drawn from shared hyperpriors | Borrows strength across regimes |
+
+Regime-level coefficients are drawn from global hyperpriors:
+
+```
+alpha_r[k] = mu_alpha + alpha_offset[k] * sigma_alpha
+```
+
+`sigma_alpha` controls the degree of pooling: if its posterior is small, the
+regimes are similar and share a common intercept; if large, each regime has a
+distinct intercept. This is *learned from data*, not assumed.
+
+### 10. Non-centered parameterization
+
+Regime parameters use the non-centered form above rather than the centered form
+`alpha_r[k] ~ Normal(mu_alpha, sigma_alpha)`. When `sigma_alpha` is near zero,
+the centered form creates a geometry ("Neal's funnel") that causes NUTS to
+diverge or mix poorly. The non-centered form decouples the offset from the
+scale and allows efficient sampling throughout the posterior.
+
+### 11. Prior predictive checks
+
+Before touching observed data, we verify that the priors generate plausible
+quarterly return distributions. We display the full prior predictive
+distribution (no clipping) and use `xlim=±50%` for readability, separately
+reporting the fraction of draws that fall outside this window.
+
+**Why no clipping?** Clipping before the plot hides how much probability the
+prior assigns to extreme outcomes — it makes a pathological prior look
+reasonable. The correct response to implausible prior predictive values is to
+fix the priors, not suppress the evidence.
+
+### 12. Empirical CDF for probabilities — not parametric approximation
+
+Predicted probabilities for each bucket are computed directly from the
+posterior predictive samples:
+
+```python
+prob_above_5 = np.mean(post_samples > 0.05)
+```
+
+A previous version used `scipy.stats.t.cdf` parameterized by the empirical
+mean and standard deviation of the posterior predictive samples. This is
+incorrect: the posterior predictive is a **mixture** of Student-t distributions
+(one per posterior draw of the parameters), not a single t. Using empirical
+moments of the mixture to parameterize a single t introduces bias. The direct
+empirical CDF is exact and requires no distributional assumptions.
+
+### 13. Walk-forward expanding-window validation
+
+The model is evaluated using a strict expanding-window walk-forward approach:
+
+1. Train on data up to quarter *t* only.
+2. Refit the RobustScaler on the current training window (prevents future-data
+   leakage into the scaling transformation).
+3. Sample the posterior on training data.
+4. Set features to the test quarter *t+1* and sample posterior predictive —
+   this is the out-of-sample prediction.
+5. Add quarter *t+1* to the training set and repeat.
+
+The test period covers **28 quarters (2017 Q1 – 2024 Q1)**, providing
+meaningful statistical power for model comparison (original: 5 quarters).
+
+---
+
+## Limitations and Future Extensions
+
+These are genuine limitations, not implementation bugs:
+
+- **Hard-coded regime boundaries**: VIX thresholds of 15 and 25 are domain
+  knowledge, not learned. A Hidden Markov Model or Dirichlet-process mixture
+  would learn regime transitions and boundaries jointly.
+- **Fixed feature set**: Only three lagged macro variables. Credit spreads,
+  yield curve slope, and earnings yield are known to have incremental predictive
+  power for equity returns.
+- **Time-invariant coefficients**: A Gaussian random walk prior on the betas
+  (state-space model) would capture structural breaks — e.g., the post-2008
+  regime shift in interest rate sensitivity.
+- **Regime-specific transition dynamics**: The current model treats each quarter
+  as independently classified. Modeling regime persistence (staying in a high-
+  VIX regime is more likely than transitioning out in one quarter) would improve
+  regime assignment.
+- **Short training history**: 2000–2016 training data (~65 quarters) spans two
+  full market cycles. Extending to pre-2000 data would add the 1990s bull run
+  and the 1987 crash to the training set.
+
+---
+
+## Setup
+
+```bash
+conda create -n pymc_env python=3.11
+conda activate pymc_env
+pip install pymc arviz pandas scikit-learn matplotlib seaborn statsmodels
+jupyter notebook sp_return_prob_bayes.ipynb
+```
+
+Or in **VS Code**: switch to the `claude/hierarchical-bayesian-review-9Th9N`
+branch, open the `.ipynb` file, and select the `pymc_env` kernel.
+
+---
+
+## Data
+
+`resources/data.csv` — monthly S&P 500 index levels, CBOE VIX, and US interest
+rates from 2000 to early 2024. Resampled to quarterly (end-of-quarter) before
+any analysis.
+
+---
+
+## References
+
+- Martin, Osvaldo. *Bayesian Analysis with Python*, 3rd Edition.
+- Kanungo, Deepak K. *Probabilistic Machine Learning for Finance and Investing*, 1st Edition.
+- Mandelbrot, Benoit. *The Misbehavior of Markets* — on fat tails and power laws in financial returns.
+- Taleb, Nassim N. *The Black Swan* — on the limits of historical tail estimation.
+- Gelman, Andrew et al. *Bayesian Data Analysis*, 3rd Edition — on prior
+  predictive checks, non-centered parameterization, and hierarchical models.
