@@ -290,13 +290,12 @@ branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 
 ## Data
 
-`resources/data.csv` — monthly S&P 500 index levels from 2000 to early 2024.
-Resampled to quarterly (end-of-quarter) before any analysis.
-
-Three additional series are fetched live from **FRED** at runtime:
+All data is fetched live from **FRED** at runtime (no API key required via `pandas_datareader`).
+Four series are pulled, starting Q1 1998 (one extra year as a buffer for lags and diffs):
 
 | Series | FRED ID | Used for |
 |---|---|---|
+| S&P 500 Index | `SP500` | Target variable (log quarterly returns) |
 | 10Y–2Y Treasury spread | `T10Y2Y` | Regime classifier + regression feature |
 | ICE BofA HY OAS | `BAMLH0A0HYM2` | Regime classifier + regression feature |
 | Civilian unemployment rate | `UNRATE` | Regime classifier |
