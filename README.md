@@ -54,17 +54,23 @@ Monthly data is resampled to quarters. The rationale:
 
 ### 3. Features — lagged by one quarter
 
-Six features, all lagged one quarter so they are fully known at prediction time.
+Five features, all lagged one quarter so they are fully known at prediction time.
 Yield curve and HY spread are sourced from FRED (`T10Y2Y`, `BAMLH0A0HYM2`).
 
 | Feature | Transformation | Rationale |
 |---|---|---|
 | `yield_curve_lag1` | Previous quarter-end 10Y–2Y spread (raw level) | Forward-looking macro regime signal; inverted curve precedes recessions |
 | `yield_curve_chg_lag1` | Quarter-over-quarter change in 10Y–2Y spread | Momentum in yield curve steepening / flattening |
-| `hy_spread_lag1` | Log change in HY OAS spread | Credit-risk appetite signal; widens ahead of equity drawdowns |
+| `hy_spread_lag1` | Previous quarter-end HY OAS level | Credit-risk appetite signal; widens ahead of equity drawdowns |
 | `hy_spread_chg_lag1` | Quarter-over-quarter log change in HY OAS | Spread momentum — rapidly widening spreads signal risk-off |
-| `VIX_lag1` | Log change in VIX | Volatility momentum (reactive, not predictive — retained as feature, not regime classifier) |
 | `sp_returns_lag1` | Log return of S&P 500 | Momentum / mean-reversion |
+
+**VIX is excluded entirely.** VIX is a reactive signal: it spikes *during*
+crises, not before them. Its information is already partially captured by
+`sp_returns_lag1` (large negative return ↔ VIX spike) and `hy_spread_chg_lag1`
+(credit stress and equity volatility co-move). Including it would add a
+collinear predictor whose coefficient posterior would straddle zero, adding
+noise without signal.
 
 Lagging is a strict requirement: using same-quarter features would constitute
 look-ahead bias and overstate out-of-sample accuracy.
@@ -169,10 +175,6 @@ credit stress) and unemployment continued to fall. The composite correctly kept
 most of 2022–2024 in the *Transitional* regime — consistent with observed S&P
 500 performance.
 
-**Why not VIX?** VIX is a reactive signal — it spikes *during* crises, not
-before them. It is retained as a regression feature (`VIX_lag1`) to capture
-volatility momentum, but excluded from the regime classifier.
-
 **No test-set contamination**: z-score normalization parameters and tertile
 thresholds are derived entirely from pre-2019 training data. The test period
 (2019–2024) is never consulted during regime design, keeping the walk-forward
@@ -271,9 +273,8 @@ These are genuine limitations, not implementation bugs:
   (state-space model) would capture structural breaks — e.g., the post-2008
   regime shift in interest rate sensitivity.
 - **Regime-specific transition dynamics**: The current model treats each quarter
-  as independently classified. Modeling regime persistence (staying in a high-
-  VIX regime is more likely than transitioning out in one quarter) would improve
-  regime assignment.
+  as independently classified. Modeling regime persistence (recessionary regimes
+  tend to last multiple quarters) would improve regime assignment.
 - **Short training history**: 2000–2016 training data (~65 quarters) spans two
   full market cycles. Extending to pre-2000 data would add the 1990s bull run
   and the 1987 crash to the training set.
@@ -296,8 +297,9 @@ branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 
 ## Data
 
-`resources/data.csv` — monthly S&P 500 index levels and CBOE VIX from 2000 to
-early 2024. Resampled to quarterly (end-of-quarter) before any analysis.
+`resources/data.csv` — monthly S&P 500 index levels from 2000 to early 2024
+(the file also contains VIX, which is no longer used by the model).
+Resampled to quarterly (end-of-quarter) before any analysis.
 
 Three additional series are fetched live from **FRED** at runtime:
 
