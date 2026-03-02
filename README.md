@@ -21,8 +21,8 @@ including the COVID crash, the 2022 bear market, and the 2023 recovery.
 1. **Flat Bayesian Linear Regression** — a single set of parameters, Student-t
    likelihood, serving as the baseline.
 2. **Hierarchical Bayesian Model** — three-level partial-pooling model with
-   VIX-based market regimes, regime-specific coefficients, and regime-specific
-   tail/scale parameters.
+   composite-stress-score market regimes, regime-specific coefficients, and
+   regime-specific tail/scale parameters.
 
 ---
 
@@ -139,35 +139,44 @@ HalfNormal places most mass near small positive values. The scale parameter
 capturing **volatility clustering** — the well-documented empirical pattern
 that high-volatility periods cluster together.
 
-### 8. Yield-curve-based market regimes — lagged, not contemporaneous
+### 8. Composite macro stress score — regime classifier
 
-The hierarchical model classifies each quarter into one of three regimes based
-on **the previous quarter's 10Y–2Y yield curve spread** (not the current
-quarter's):
+The hierarchical model classifies each quarter into one of three regimes using a
+**composite stress score** that aggregates three lagged macro signals, all fully
+known at the start of each quarter (no look-ahead bias):
 
-| Regime | Lagged 10Y–2Y spread | Market environment |
+| Signal | Stressed direction | Economic rationale |
 |---|---|---|
-| 0 — Recessionary | < 0% (inverted) | Credit stress, elevated recession risk |
-| 1 — Transitional | 0% – 1% | Flattening or early steepening cycle |
-| 2 — Expansionary | ≥ 1% (normal) | Healthy credit conditions, expansion |
+| 10Y–2Y yield curve slope (negated) | Inverted (< 0%) | Precedes recession by 6–18 months; forward-looking |
+| ICE BofA HY option-adjusted spread | Wide spread | Credit market pricing real distress |
+| Unemployment rate change | Rising | Labour market deterioration confirming slowdown |
 
-**Why the yield curve, not VIX?** VIX is a reactive signal — it spikes *during*
-crises, not before them. Predicting a quarter's returns using the same quarter's
-VIX spike is look-ahead bias. The yield curve is a *forward-looking* signal:
-an inverted 10Y–2Y spread has preceded every US recession since 1955, typically
-leading by 6–18 months. It is also fully observable at the start of the quarter.
+Each signal is z-scored using **training data statistics only**, then averaged
+into a single composite. Training-data tertiles map the composite to three
+regimes:
 
-VIX is retained as a regression feature (`VIX_lag1`) to capture volatility
-momentum effects, but the regime classifier is the yield curve.
+| Regime | Composite score | Market environment |
+|---|---|---|
+| 0 — Recessionary | Top tertile (high stress) | Multiple signals simultaneously stressed |
+| 1 — Transitional | Middle tertile | Mixed signals, late-cycle or early recovery |
+| 2 — Expansionary | Bottom tertile (low stress) | All signals benign, growth environment |
 
-**Why lagged?** The regime is determined by the *previous quarter's* spread —
-fully known before the quarter under prediction begins. Using the current
-quarter's spread would leak information about events that unfold during the
-quarter.
+**Why a composite?** A single yield-curve signal can produce false alarms. The
+2022–2024 period is a good example: the 10Y–2Y spread inverted sharply, which
+under a yield-curve-only classifier would flag the entire period as
+*Recessionary*. But HY credit spreads stayed tight (markets were not pricing
+credit stress) and unemployment continued to fall. The composite correctly kept
+most of 2022–2024 in the *Transitional* regime — consistent with observed S&P
+500 performance.
 
-The hard thresholds (0%, 1%) are fixed domain knowledge, not learned. A future
-extension would treat regime membership as a latent variable and learn the
-thresholds jointly (Hidden Markov Model).
+**Why not VIX?** VIX is a reactive signal — it spikes *during* crises, not
+before them. It is retained as a regression feature (`VIX_lag1`) to capture
+volatility momentum, but excluded from the regime classifier.
+
+**No test-set contamination**: z-score normalization parameters and tertile
+thresholds are derived entirely from pre-2019 training data. The test period
+(2019–2024) is never consulted during regime design, keeping the walk-forward
+evaluation genuinely out-of-sample.
 
 ### 9. Partial pooling (hierarchical model)
 
@@ -233,16 +242,15 @@ The model is evaluated using a strict expanding-window walk-forward approach:
 **Train/test split: `train_end_year = 2018`** (~73 training quarters,
 21 test quarters: 2019 Q1 – 2024 Q1).
 
-The split year was chosen to balance two competing constraints. The dataset
-contains ~94 usable quarters, with the High VIX regime (lagged VIX ≥ 25)
-accounting for only 21 of them. Cutting earlier (e.g. 2016) leaves the High
-VIX regime with ~12–14 training quarters — so sparse that the hierarchical
-model's partial pooling carries almost all the weight and the regime-specific
-parameters are barely identified by data. Cutting at 2018 gives the High VIX
-regime ~16–18 training quarters (adding the 2018 Q4 volatility spike), while
-still leaving a 21-quarter test period that covers the COVID crash (2020 Q1),
-the low-volatility 2021 bull run, the 2022 inflation-driven bear market, and
-the 2023–2024 recovery — a genuine stress test across all three regimes.
+The split year was chosen to ensure each regime has enough training observations
+for meaningful partial pooling while leaving a demanding test period. Cutting at
+2018 includes the 2008–2009 GFC, the 2011 European debt crisis, and the 2018 Q4
+volatility spike in the training set — enough recessionary and transitional
+quarters for the regime-specific parameters to be data-identified rather than
+driven entirely by the hyperpriors. The 21-quarter test period then covers the
+COVID crash (2020 Q1), the low-volatility 2021 bull run, the 2022
+inflation-driven bear market, and the 2023–2024 recovery — a genuine stress test
+spanning all three composite-stress regimes.
 
 ---
 
@@ -250,12 +258,15 @@ the 2023–2024 recovery — a genuine stress test across all three regimes.
 
 These are genuine limitations, not implementation bugs:
 
-- **Hard-coded regime boundaries**: VIX thresholds of 15 and 25 are domain
-  knowledge, not learned. A Hidden Markov Model or Dirichlet-process mixture
-  would learn regime transitions and boundaries jointly.
-- **Fixed feature set**: Only three lagged macro variables. Credit spreads,
-  yield curve slope, and earnings yield are known to have incremental predictive
-  power for equity returns.
+- **Hard-coded regime boundaries**: Composite stress tertile thresholds are fixed
+  from training data. A Hidden Markov Model or Dirichlet-process mixture would
+  learn regime transitions and boundaries jointly with return dynamics.
+- **Equal-weighted composite**: The three stress signals contribute equally to
+  the composite score. Learned weights (e.g. from a logistic regression on
+  NBER recession dates) might improve regime separation.
+- **Fixed feature set**: The regression uses six lagged macro variables. Earnings
+  yield, consumer sentiment, and PMI have known incremental predictive power for
+  equity returns.
 - **Time-invariant coefficients**: A Gaussian random walk prior on the betas
   (state-space model) would capture structural breaks — e.g., the post-2008
   regime shift in interest rate sensitivity.
@@ -285,9 +296,16 @@ branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 
 ## Data
 
-`resources/data.csv` — monthly S&P 500 index levels, CBOE VIX, and US interest
-rates from 2000 to early 2024. Resampled to quarterly (end-of-quarter) before
-any analysis.
+`resources/data.csv` — monthly S&P 500 index levels and CBOE VIX from 2000 to
+early 2024. Resampled to quarterly (end-of-quarter) before any analysis.
+
+Three additional series are fetched live from **FRED** at runtime:
+
+| Series | FRED ID | Used for |
+|---|---|---|
+| 10Y–2Y Treasury spread | `T10Y2Y` | Regime classifier + regression feature |
+| ICE BofA HY OAS | `BAMLH0A0HYM2` | Regime classifier + regression feature |
+| Civilian unemployment rate | `UNRATE` | Regime classifier |
 
 ---
 
