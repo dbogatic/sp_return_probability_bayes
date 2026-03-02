@@ -65,13 +65,6 @@ Yield curve and HY spread are sourced from FRED (`T10Y2Y`, `BAMLH0A0HYM2`).
 | `hy_spread_chg_lag1` | Quarter-over-quarter log change in HY OAS | Spread momentum — rapidly widening spreads signal risk-off |
 | `sp_returns_lag1` | Log return of S&P 500 | Momentum / mean-reversion |
 
-**VIX is excluded entirely.** VIX is a reactive signal: it spikes *during*
-crises, not before them. Its information is already partially captured by
-`sp_returns_lag1` (large negative return ↔ VIX spike) and `hy_spread_chg_lag1`
-(credit stress and equity volatility co-move). Including it would add a
-collinear predictor whose coefficient posterior would straddle zero, adding
-noise without signal.
-
 Lagging is a strict requirement: using same-quarter features would constitute
 look-ahead bias and overstate out-of-sample accuracy.
 
@@ -266,7 +259,7 @@ These are genuine limitations, not implementation bugs:
 - **Equal-weighted composite**: The three stress signals contribute equally to
   the composite score. Learned weights (e.g. from a logistic regression on
   NBER recession dates) might improve regime separation.
-- **Fixed feature set**: The regression uses six lagged macro variables. Earnings
+- **Fixed feature set**: The regression uses five lagged macro variables. Earnings
   yield, consumer sentiment, and PMI have known incremental predictive power for
   equity returns.
 - **Time-invariant coefficients**: A Gaussian random walk prior on the betas
@@ -297,8 +290,7 @@ branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 
 ## Data
 
-`resources/data.csv` — monthly S&P 500 index levels from 2000 to early 2024
-(the file also contains VIX, which is no longer used by the model).
+`resources/data.csv` — monthly S&P 500 index levels from 2000 to early 2024.
 Resampled to quarterly (end-of-quarter) before any analysis.
 
 Three additional series are fetched live from **FRED** at runtime:
