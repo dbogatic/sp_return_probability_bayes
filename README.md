@@ -15,7 +15,7 @@ quarterly S&P 500 returns will fall within four buckets:
 | Strong negative | < −5% | < −4.9% |
 
 The **Hierarchical Bayesian Model** is the forecasting model. It uses a
-three-level partial-pooling structure with composite-stress-score market
+three-level partial-pooling structure with yield-curve-based market
 regimes, regime-specific coefficients, and regime-specific tail/scale
 parameters.
 
@@ -238,7 +238,7 @@ quarters for the regime-specific parameters to be data-identified rather than
 driven entirely by the hyperpriors. The 21-quarter test period then covers the
 COVID crash (2020 Q1), the low-volatility 2021 bull run, the 2022
 inflation-driven bear market, and the 2023–2024 recovery — a genuine stress test
-spanning all three composite-stress regimes.
+spanning all three yield-curve regimes.
 
 ---
 
