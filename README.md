@@ -277,7 +277,8 @@ across all four buckets at once. Think of it as an "average squared miss."
 
 Lower is better. The **Brier Skill Score (BSS)** rescales this so that
 0 = no better than random and 1 = perfect. A positive BSS means the model
-adds real forecasting value beyond a coin flip.
+adds real forecasting value beyond a coin flip. See **cell 34** for the
+computed values for both models.
 
 > *Plain English: a model that confidently called the 2020 Q1 crash correctly
 > would earn a very low (good) Brier Score for that quarter. A model that was
@@ -294,6 +295,8 @@ confidence and **severely penalises overconfident wrong predictions**.
 - **Perfect = 0**
 - Lower is better
 
+See **cell 34** for the side-by-side table of all three metrics for both models.
+
 > *Plain English: if the model says "90% chance of a strong quarter" and it
 > crashes instead, the Log Score punishes that far harder than the Brier Score
 > does. A low Log Score means the model is both right and honest about its
@@ -301,7 +304,7 @@ confidence and **severely penalises overconfident wrong predictions**.
 
 ---
 
-### Regime-Stratified Table (cell 35)
+### Regime-Stratified Table and Calibration Diagram (cell 35)
 
 The regime-stratified breakdown shows accuracy and Brier Score separately for
 Recessionary, Transitional, and Expansionary quarters. This is where the
