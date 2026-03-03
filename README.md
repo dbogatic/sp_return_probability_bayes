@@ -245,27 +245,103 @@ spanning all three composite-stress regimes.
 ## Out-of-Sample Accuracy
 
 Both models are evaluated on **21 quarters (2019 Q1 – 2024 Q1)** that were
-never seen during training. For each quarter the model outputs four
-probabilities (one per return bucket). We call the model **correct** if the
-bucket it was most confident about actually contained the realised return —
-essentially a four-way classification where random guessing would score 25%.
+never seen during training. Three complementary metrics are computed in
+**cells 33–35**.
 
-| Model | Correct quarters | Out of 21 | Accuracy |
-|---|---|---|---|
-| **Hierarchical Bayesian** | see cell 31 | 21 | see cell 31 |
-| Flat Bayesian (benchmark) | see cell 21 | 21 | see cell 21 |
+---
 
-> **How to read this in plain English:** If the model said "I think there's a
-> 45% chance returns are strongly positive this quarter, higher than any other
-> bucket," and returns were indeed strongly positive, that counts as correct.
-> The hierarchical model is expected to outperform the flat model, particularly
-> during the COVID crash (2020 Q1) and the 2022 bear market, where
-> regime-specific parameters should better capture the distribution of returns
-> under stressed conditions.
+### Metric 1 — Top-Bucket Accuracy (cells 21 and 31)
 
-The walk-forward design is strict: at each step the model only knows what was
-available *at the time of the forecast* — no future data ever leaks into
-training, feature scaling, or regime assignment.
+Each quarter the model assigns a probability to four possible outcomes:
+
+| Bucket | Meaning |
+|---|---|
+| Strong positive | S&P 500 returns more than +5% that quarter |
+| Mildly positive | Returns between 0% and +5% |
+| Mildly negative | Returns between −5% and 0% |
+| Significant drop | Returns worse than −5% |
+
+The model is **correct** if the bucket it was most confident about actually
+happened. Random guessing hits 25% (1 in 4). See cells 21 and 31 for the
+actual numbers.
+
+---
+
+### Metric 2 — Brier Score (cell 34)
+
+Measures how far the predicted probabilities are from the true outcome,
+across all four buckets at once. Think of it as an "average squared miss."
+
+- **0 = perfect** — every probability was spot-on
+- **0.75 = random** — what you'd score by guessing 25% for every bucket
+
+Lower is better. The **Brier Skill Score (BSS)** rescales this so that
+0 = no better than random and 1 = perfect. A positive BSS means the model
+adds real forecasting value beyond a coin flip.
+
+> *Plain English: a model that confidently called the 2020 Q1 crash correctly
+> would earn a very low (good) Brier Score for that quarter. A model that was
+> 80% confident in the wrong bucket would be heavily penalised.*
+
+---
+
+### Metric 3 — Log Score (cell 34)
+
+Also called the logarithmic scoring rule. It rewards genuine, well-placed
+confidence and **severely penalises overconfident wrong predictions**.
+
+- **Random baseline ≈ 1.39** — what you'd score guessing 25% every time
+- **Perfect = 0**
+- Lower is better
+
+> *Plain English: if the model says "90% chance of a strong quarter" and it
+> crashes instead, the Log Score punishes that far harder than the Brier Score
+> does. A low Log Score means the model is both right and honest about its
+> uncertainty.*
+
+---
+
+### Regime-Stratified Table (cell 35)
+
+The regime-stratified breakdown shows accuracy and Brier Score separately for
+Recessionary, Transitional, and Expansionary quarters. This is where the
+hierarchical model should visibly outperform the flat model — it learns
+different behaviour per regime rather than averaging everything together.
+
+---
+
+### Walk-Forward Design (no data leakage)
+
+At every step the model only knows what was available *at the time of the
+forecast*: training data, feature scaling, and regime boundaries are all
+computed using only past quarters. No future information ever leaks in.
+
+---
+
+## Next-Quarter Forecast (cells 36–38)
+
+After evaluation, the model retrains on **all available data** and uses the
+most recent quarter's macro readings to forecast the next quarter.
+
+**What the forecast outputs:**
+
+- **Regime** — which yield-curve environment next quarter falls into
+  (Recessionary / Transitional / Expansionary), based on the current
+  10Y–2Y Treasury spread
+- **Bucket probabilities** — the probability of each of the four return
+  outcomes
+- **Expected return** — the probability-weighted average forecast
+- **Credible intervals** — 50% CI (inner range where the model is fairly
+  confident) and 90% CI (the wide range covering most plausible outcomes)
+- **Probability bar chart** — visual summary with the 25% random baseline
+
+> *Plain English: the forecast does not say "the market will go up X%." It
+> says "given current macro conditions, here is how probable each outcome is."
+> A wide credible interval means genuine uncertainty — the model is being
+> honest rather than hiding behind a false point estimate.*
+
+The retraining cell (~5 min sampling time) is cell 37; the chart and
+plain-English output are in cell 38.
 
 ---
 
@@ -273,12 +349,10 @@ training, feature scaling, or regime assignment.
 
 These are genuine limitations, not implementation bugs:
 
-- **Hard-coded regime boundaries**: Composite stress tertile thresholds are fixed
-  from training data. A Hidden Markov Model or Dirichlet-process mixture would
-  learn regime transitions and boundaries jointly with return dynamics.
-- **Equal-weighted composite**: The three stress signals contribute equally to
-  the composite score. Learned weights (e.g. from a logistic regression on
-  NBER recession dates) might improve regime separation.
+- **Hard-coded regime boundaries**: The 0% and 1% yield-curve thresholds are
+  economically motivated but fixed. A Hidden Markov Model or Dirichlet-process
+  mixture would learn regime transitions and boundaries jointly with return
+  dynamics.
 - **Fixed feature set**: The regression uses five lagged macro variables. Earnings
   yield, consumer sentiment, and PMI have known incremental predictive power for
   equity returns.
