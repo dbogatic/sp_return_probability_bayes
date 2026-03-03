@@ -49,12 +49,14 @@ We model log returns `ln(P_t / P_{t-1})` rather than simple percentage returns.
 
 Monthly data is resampled to quarters. The rationale:
 
-- Macro variables (VIX, interest rates) have stronger predictive signal over
-  multi-month horizons; monthly noise is reduced.
+- Macro variables (interest rates, credit spreads) have stronger predictive
+  signal over multi-month horizons; monthly noise is reduced.
 - Quarterly is the natural unit for institutional reporting and portfolio
   rebalancing decisions.
-- With ~24 years of data (2000–2024), quarterly frequency gives ~95 usable
-  observations — reasonable for Bayesian estimation.
+- With data pulled from FRED starting Q1 1997, usable observations begin
+  around Q1 1999 (~105 quarters through 2024) — reasonable for Bayesian
+  estimation with enough recessionary and transitional quarters to
+  data-identify regime-specific parameters.
 
 ### 3. Features — lagged by one quarter
 
@@ -142,40 +144,27 @@ HalfNormal places most mass near small positive values. The scale parameter
 capturing **volatility clustering** — the well-documented empirical pattern
 that high-volatility periods cluster together.
 
-### 8. Composite macro stress score — regime classifier
+### 8. Yield-curve regime classifier
 
-The hierarchical model classifies each quarter into one of three regimes using a
-**composite stress score** that aggregates three lagged macro signals, all fully
-known at the start of each quarter (no look-ahead bias):
+The hierarchical model classifies each quarter into one of three regimes using
+the **previous quarter's 10Y–2Y Treasury yield spread** — fully known at the
+start of each quarter (no look-ahead bias):
 
-| Signal | Stressed direction | Economic rationale |
+| Regime | Lagged yield curve slope | Market environment |
 |---|---|---|
-| 10Y–2Y yield curve slope (negated) | Inverted (< 0%) | Precedes recession by 6–18 months; forward-looking |
-| ICE BofA HY option-adjusted spread | Wide spread | Credit market pricing real distress |
-| Unemployment rate change | Rising | Labour market deterioration confirming slowdown |
+| 0 — Recessionary | < 0% (inverted) | Curve has inverted; elevated recession risk |
+| 1 — Transitional | 0% to 1% (flat) | Late-cycle or early recovery |
+| 2 — Expansionary | ≥ 1% (steep) | Normal growth environment |
 
-Each signal is z-scored using **training data statistics only**, then averaged
-into a single composite. Training-data tertiles map the composite to three
-regimes:
+**Why yield curve slope?** The 10Y–2Y spread has inverted before every US
+recession since 1955 and does so *before* the downturn begins — making it a
+genuinely forward-looking signal. By contrast, VIX and credit spreads tend to
+react *during* crises rather than anticipate them. The yield curve is the
+single most informative public macro signal for near-term recession risk.
 
-| Regime | Composite score | Market environment |
-|---|---|---|
-| 0 — Recessionary | Top tertile (high stress) | Multiple signals simultaneously stressed |
-| 1 — Transitional | Middle tertile | Mixed signals, late-cycle or early recovery |
-| 2 — Expansionary | Bottom tertile (low stress) | All signals benign, growth environment |
-
-**Why a composite?** A single yield-curve signal can produce false alarms. The
-2022–2024 period is a good example: the 10Y–2Y spread inverted sharply, which
-under a yield-curve-only classifier would flag the entire period as
-*Recessionary*. But HY credit spreads stayed tight (markets were not pricing
-credit stress) and unemployment continued to fall. The composite correctly kept
-most of 2022–2024 in the *Transitional* regime — consistent with observed S&P
-500 performance.
-
-**No test-set contamination**: z-score normalization parameters and tertile
-thresholds are derived entirely from pre-2019 training data. The test period
-(2019–2024) is never consulted during regime design, keeping the walk-forward
-evaluation genuinely out-of-sample.
+**No test-set contamination**: regime boundaries (0% and 1%) are economically
+motivated thresholds, not data-fitted. The test period (2019–2024) is never
+consulted during regime design.
 
 ### 9. Partial pooling (hierarchical model)
 
@@ -253,6 +242,33 @@ spanning all three composite-stress regimes.
 
 ---
 
+## Out-of-Sample Accuracy
+
+Both models are evaluated on **21 quarters (2019 Q1 – 2024 Q1)** that were
+never seen during training. For each quarter the model outputs four
+probabilities (one per return bucket). We call the model **correct** if the
+bucket it was most confident about actually contained the realised return —
+essentially a four-way classification where random guessing would score 25%.
+
+| Model | Correct quarters | Out of 21 | Accuracy |
+|---|---|---|---|
+| **Hierarchical Bayesian** | see cell 31 | 21 | see cell 31 |
+| Flat Bayesian (benchmark) | see cell 21 | 21 | see cell 21 |
+
+> **How to read this in plain English:** If the model said "I think there's a
+> 45% chance returns are strongly positive this quarter, higher than any other
+> bucket," and returns were indeed strongly positive, that counts as correct.
+> The hierarchical model is expected to outperform the flat model, particularly
+> during the COVID crash (2020 Q1) and the 2022 bear market, where
+> regime-specific parameters should better capture the distribution of returns
+> under stressed conditions.
+
+The walk-forward design is strict: at each step the model only knows what was
+available *at the time of the forecast* — no future data ever leaks into
+training, feature scaling, or regime assignment.
+
+---
+
 ## Limitations and Future Extensions
 
 These are genuine limitations, not implementation bugs:
@@ -272,9 +288,10 @@ These are genuine limitations, not implementation bugs:
 - **Regime-specific transition dynamics**: The current model treats each quarter
   as independently classified. Modeling regime persistence (recessionary regimes
   tend to last multiple quarters) would improve regime assignment.
-- **Short training history**: 2000–2016 training data (~65 quarters) spans two
-  full market cycles. Extending to pre-2000 data would add the 1990s bull run
-  and the 1987 crash to the training set.
+- **Training history**: Training data spans Q1 1999–2018 (~80 quarters) and
+  covers two full market cycles. Extending further back (pre-1997) would add
+  the 1990s bull run and the 1987 crash, but FRED's HY spread series
+  (`BAMLH0A0HYM2`) only begins in 1996, limiting the practical start date.
 
 ---
 
@@ -295,14 +312,15 @@ branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 ## Data
 
 All data is fetched live from **FRED** at runtime (no API key required via `pandas_datareader`).
-Four series are pulled, starting Q1 1998 (one extra year as a buffer for lags and diffs):
+Three series are pulled starting Q1 1997 (buffer for first diff and one quarter of lag):
 
 | Series | FRED ID | Used for |
 |---|---|---|
 | S&P 500 Index | `SP500` | Target variable (log quarterly returns) |
 | 10Y–2Y Treasury spread | `T10Y2Y` | Regime classifier + regression feature |
-| ICE BofA HY OAS | `BAMLH0A0HYM2` | Regime classifier + regression feature |
-| Civilian unemployment rate | `UNRATE` | Regime classifier |
+| ICE BofA HY OAS | `BAMLH0A0HYM2` | Regression feature |
+
+After differencing and lagging, usable observations begin around Q1 1999.
 
 ---
 
