@@ -14,15 +14,19 @@ quarterly S&P 500 returns will fall within four buckets:
 | Mild negative | −5% to 0% | −4.9% to 0% |
 | Strong negative | < −5% | < −4.9% |
 
-Two models are implemented and compared using a **21-quarter out-of-sample
-walk-forward test (2019 Q1 – 2024 Q1)**, spanning a full market cycle
-including the COVID crash, the 2022 bear market, and the 2023 recovery.
+The **Hierarchical Bayesian Model** is the forecasting model. It uses a
+three-level partial-pooling structure with composite-stress-score market
+regimes, regime-specific coefficients, and regime-specific tail/scale
+parameters.
 
-1. **Flat Bayesian Linear Regression** — a single set of parameters, Student-t
-   likelihood, serving as the baseline.
-2. **Hierarchical Bayesian Model** — three-level partial-pooling model with
-   composite-stress-score market regimes, regime-specific coefficients, and
-   regime-specific tail/scale parameters.
+A **Flat Bayesian Linear Regression** (single parameter set, Student-t
+likelihood) is retained solely as a benchmark to validate that the
+hierarchical structure earns its complexity — if it did not outperform a
+simpler flat model, the regime design would need revisiting.
+
+Both are evaluated on a **21-quarter out-of-sample walk-forward test
+(2019 Q1 – 2024 Q1)**, spanning a full market cycle including the COVID
+crash, the 2022 bear market, and the 2023 recovery.
 
 ---
 
