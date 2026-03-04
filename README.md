@@ -434,6 +434,40 @@ training set. The yield curve was steepening rapidly *while* equities fell
 — a decoupling of the slope regime from equity returns that the model has
 no feature to detect.
 
+| Quarter | Model confidence | Predicted bucket | Actual return | Regime assigned |
+|---|---|---|---|---|
+| 2022 Q1 | ~32% | Mild positive | −4.9% | Transitional |
+| 2022 Q2 | ~70% | Strong positive | **−16.4%** | Transitional |
+| 2022 Q3 | ~70% | Mild negative | −5.3% | Transitional |
+| 2022 Q4 | ~39% | Mild positive | +7.1% | Recessionary |
+
+The root cause: real yields swung from **−6% to +1%** in twelve months
+(10Y Treasury rising sharply while CPI ran at ~8% YoY). Yield curve
+*slope* was blind to this — a steeply positive slope normally signals
+expansion, not a −16% quarter. The inflation-driven discount-rate shock
+was a regime the model had never seen in training.
+
+### Overconfidence diagnosis
+
+The **Log Score** is the key metric here — it penalises overconfident
+wrong predictions far harder than the Brier Score. A model that assigns
+95% probability and is wrong pays an enormous penalty; a model that says
+50% and is wrong pays a moderate one.
+
+The 2022 Q2 call (70% confidence, −16% outcome) is a textbook
+overconfidence failure. The model assigned high probability to a benign
+outcome because every feature it could see — a positive yield slope, low
+HY spreads, recent positive momentum — pointed that way. It had no signal
+for the rate-level shock that was actually driving returns.
+
+**Diagnosis summary:**
+
+| Issue | Evidence | Root cause |
+|---|---|---|
+| Overconfidence in 2022 | Log Score penalised heavily; 70% confidence on wrong bucket | Missing inflation / real-yield feature |
+| Weak Transitional skill | BSS = 0.053 vs 0.136 Recessionary | Most quarters land here; regime is too coarse |
+| Single failure mode | All 4 wrong quarters clustered in 2022 | Out-of-distribution regime, not random noise |
+
 ### What this means for use
 
 This model is best used as **one probabilistic input** in a broader
@@ -510,30 +544,84 @@ It contains everything needed for a quarterly decision briefing:
 
 ---
 
-## Limitations and Future Extensions
+## Improvement Roadmap
 
-These are genuine limitations, not implementation bugs:
+Prioritised by expected impact on the two diagnosed failure modes (overconfidence + weak Transitional skill).
+
+### Priority 1 — Fix overconfidence (calibration)
+
+- **Temperature / Platt scaling**: post-hoc calibration step that squeezes
+  predicted probabilities toward the centre when the model is systematically
+  overconfident. Does not require retraining the Bayesian model.
+- **Minimum-entropy prior**: enforce a floor on outcome uncertainty so the
+  model cannot assign >70–75% to a single bucket without very strong data
+  support. Directly targets the 2022 Q2–Q3 failure mode.
+- **Track calibration curves per regime**: the 2×2 calibration plots already
+  exist — use them to identify which buckets are most miscalibrated and by
+  how much, then target corrections there first.
+
+### Priority 2 — Add inflation / rate-level features
+
+The single highest-value model extension, directly motivated by 2022:
+
+| Feature | Why |
+|---|---|
+| `real_yield_lag1` (10Y − CPI YoY) | Captures 2022-style discount-rate shocks invisible to slope alone |
+| `cpi_momentum_lag1` (QoQ change in CPI) | Rate of change of inflation, not just level |
+| `fed_funds_chg_lag1` | Policy tightening / easing speed |
+| `breakeven_inflation_lag1` | Market-implied inflation expectations (FRED: `T10YIE`) |
+
+These are all available on FRED with no API key, consistent with the existing data pipeline.
+
+### Priority 3 — Refine the Transitional regime
+
+Transitional is the weakest regime (BSS = 0.053) and the most common
+(18 of 29 test quarters). It is too coarse — it lumps together
+late-cycle tightening and early-cycle recovery, which have opposite
+equity implications.
+
+- Split into **Transitional-Rising** (yield curve moving toward inversion)
+  and **Transitional-Recovering** (curve moving away from inversion)
+- Alternatively: learn regime boundaries jointly from data using a
+  **Hidden Markov Model** or **Dirichlet-process mixture**, rather than
+  fixing them at 0% and 1%.
+
+### Priority 4 — Reduce overfit to regime snapshots
+
+- **Regime persistence prior**: the current model classifies each quarter
+  independently. Recessionary regimes typically last 3–6 quarters; a
+  Markov transition prior on regime assignments would smooth noisy
+  quarter-to-quarter regime flips.
+- **Time-varying coefficients**: a Gaussian random walk prior on the
+  betas (state-space model) would capture structural breaks such as the
+  post-2008 shift in interest-rate sensitivity.
+
+### Priority 5 — Widen the training set
+
+- Training data spans Q1 1999–2018 (~80 quarters, two market cycles).
+  Extending further back would add the 1990s bull run and the 1987 crash,
+  but FRED's HY spread series (`BAMLH0A0HYM2`) only starts in 1996,
+  which is the practical floor.
+- Consider **bootstrapped stress scenarios** or **synthetic 2022-style
+  episodes** to supplement the single inflation-shock example in the
+  out-of-sample period.
+
+---
+
+## Limitations
+
+These are known structural constraints, not bugs:
 
 - **Hard-coded regime boundaries**: The 0% and 1% yield-curve thresholds are
-  economically motivated but fixed. A Hidden Markov Model or Dirichlet-process
-  mixture would learn regime transitions and boundaries jointly with return
-  dynamics.
-- **No rate-level or inflation features**: The regression uses yield *slope*
-  but not yield *level*, CPI, or the fed funds rate. The 2022 backtest makes
-  this gap concrete — the inflation-driven bear market decoupled yield slope
-  from equity returns in a way the model cannot detect. Adding real yield or
-  CPI momentum is the highest-priority extension. Earnings yield, consumer
-  sentiment, and PMI also have known incremental predictive power.
-- **Time-invariant coefficients**: A Gaussian random walk prior on the betas
-  (state-space model) would capture structural breaks — e.g., the post-2008
-  regime shift in interest rate sensitivity.
-- **Regime-specific transition dynamics**: The current model treats each quarter
-  as independently classified. Modeling regime persistence (recessionary regimes
-  tend to last multiple quarters) would improve regime assignment.
-- **Training history**: Training data spans Q1 1999–2018 (~80 quarters) and
-  covers two full market cycles. Extending further back (pre-1997) would add
-  the 1990s bull run and the 1987 crash, but FRED's HY spread series
-  (`BAMLH0A0HYM2`) only begins in 1996, limiting the practical start date.
+  economically motivated but fixed. A data-driven approach would learn them.
+- **No rate-level or inflation features**: The 2022 failure makes this gap
+  concrete. See Priority 2 above for the fix.
+- **Time-invariant coefficients**: structural breaks (e.g., post-2008 rate
+  sensitivity) are not captured. See Priority 4.
+- **Independent quarter assumption**: regime persistence is not modelled.
+  See Priority 4.
+- **Training history ceiling**: limited by FRED HY spread availability
+  (1996). See Priority 5.
 
 ---
 
