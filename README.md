@@ -319,9 +319,43 @@ At every step the model only knows what was available *at the time of the
 forecast*: training data, feature scaling, and regime boundaries are all
 computed using only past quarters. No future information ever leaks in.
 
+### Caching — backtest and trace
+
+The walk-forward loop resamples MCMC for every test quarter, which takes
+roughly 70 minutes. Results are cached to disk automatically:
+
+- **`backtest_results_YYYYMMDD.csv`** — walk-forward predictions and
+  probabilities, keyed by the last date in FRED data. If the file exists,
+  cell 30 skips the MCMC loop entirely.
+- **`trace_full_YYYYMMDD.nc`** — the full-data posterior trace used for
+  forecasting, also keyed by last data date. Cell 37 loads it instantly on
+  subsequent runs instead of resampling.
+
+Both caches invalidate automatically when a new quarter of FRED data becomes
+available (the date in the filename changes), so reruns after a data refresh
+always retrain from scratch.
+
 ---
 
-## Next-Quarter Forecast (cells 36–38)
+## Decision-Making Performance Dashboard (cell 36)
+
+After the backtest, cell 36 produces a two-panel dashboard that answers the
+practical question: *at what confidence threshold should I act on the model's
+top-bucket call?*
+
+- **Panel 1 — Per-quarter confidence bars**: each of the 21 test quarters is
+  shown as a bar coloured green (model's top bucket was correct) or red
+  (wrong), with height proportional to the model's confidence in that call.
+- **Panel 2 — Hit rate vs confidence threshold**: a table and chart showing
+  how accuracy changes as you raise the bar for acting on a forecast. If the
+  model is only correct 50% of the time overall but hits 80% when confidence
+  exceeds 50%, that threshold is where the signal is.
+
+The dashboard is saved as **`backtest_dashboard.png`**.
+
+---
+
+## Next-Quarter Forecast (cells 37–39)
 
 After evaluation, the model retrains on **all available data** and uses the
 most recent quarter's macro readings to forecast the next quarter.
@@ -343,8 +377,22 @@ most recent quarter's macro readings to forecast the next quarter.
 > A wide credible interval means genuine uncertainty — the model is being
 > honest rather than hiding behind a false point estimate.*
 
-The retraining cell (~5 min sampling time) is cell 37; the chart and
-plain-English output are in cell 38.
+The retraining cell (~5 min on first run, instant on cache hit) is cell 37;
+the chart and plain-English output are in cells 38–39.
+
+### Print-Ready Forecast Report (cell 40)
+
+Cell 40 generates a single-page briefing figure saved as
+**`forecast_YYYYQ#.png`** — one file per quarter, auto-named, archivable.
+It contains everything needed for a quarterly decision briefing:
+
+| Section | Content |
+|---|---|
+| Header | Quarter label and colour-coded regime banner |
+| Probability bars | Four return buckets with the top bucket highlighted |
+| Macro inputs table | The five lag-1 features that drove the forecast |
+| Return distribution strip | Posterior 90%/50% CI and expected return |
+| Backtest context line | Overall accuracy and hit rate at the current confidence level |
 
 ---
 
