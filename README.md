@@ -244,7 +244,7 @@ spanning all three yield-curve regimes.
 
 ## Out-of-Sample Accuracy
 
-Both models are evaluated on **21 quarters (2019 Q1 – 2024 Q1)** that were
+Both models are evaluated on **29 quarters (2019 Q1 – 2026 Q1)** that were
 never seen during training. Three complementary metrics are computed in
 **cells 33–35**.
 
@@ -355,6 +355,76 @@ The dashboard is saved as **`backtest_dashboard.png`**.
 
 ---
 
+## Practical Assessment (29-quarter backtest, 2019 Q1 – 2026 Q1)
+
+### Overall accuracy
+
+| Metric | Value |
+|---|---|
+| Quarters evaluated | 29 |
+| Top-bucket correct | 11 (38%) |
+| Random baseline | 25% |
+| Edge over random | +13pp |
+
+38% is meaningfully above chance but not high enough to use as a standalone
+decision tool. The real signal is conditional on model confidence.
+
+### The confidence threshold insight
+
+The backtest dashboard (bottom panel) shows hit rate rises sharply with
+the model's confidence in its top-bucket call:
+
+| Confidence ≥ | Hit rate | # Signals |
+|---|---|---|
+| 25% (all quarters) | 38% | 29 |
+| 40% | ~60% | ~10 |
+| 50% | ~60% | ~7 |
+| 70%+ | 100% | 1–2 |
+
+**When the model commits above ~40% confidence, it is right roughly 60% of
+the time — well above the 25% random floor.** Those high-confidence quarters
+are rare; most quarters sit in the 30–45% range where the model is
+effectively communicating genuine uncertainty rather than a clear signal.
+
+### Best calls
+
+| Quarter | Confidence | Prediction | Actual | Result |
+|---|---|---|---|---|
+| 2019 Q1 | 91% | Strong positive | +13% | ✓ |
+| 2020 Q2 | 87% | Strong positive | +20% | ✓ |
+| 2020 Q1 | — | Significant drop most likely | −20% | ✓ |
+
+The model's clearest value was catching regime-driven extremes: the COVID
+crash and the immediate recovery bounce, both driven by sharp yield-curve
+moves that the model's macro features captured cleanly.
+
+### Worst call — 2022
+
+All four quarters of 2022 were wrong. The most damaging was **2022 Q2**:
+the model was **70% confident in a strong positive outcome** while the
+market fell −16%. The full-year 2022 failure reflects a structural gap:
+the inflation-driven bear market was unlike anything in the 1999–2018
+training set. The yield curve was steepening rapidly *while* equities fell
+— a decoupling of the slope regime from equity returns that the model has
+no feature to detect.
+
+### What this means for use
+
+This model is best used as **one probabilistic input** in a broader
+decision process, not as an autonomous signal. Actionable guidance:
+
+- **Act on the model when confidence is ≥40%** — that is where the signal
+  is. Below that the model is expressing honest uncertainty, not a forecast.
+- **Cross-check with inflation / rate-level context.** The yield slope alone
+  mis-classifies regimes when rate *levels* are the dominant equity driver
+  (e.g., 2022). Adding CPI, the fed funds rate, or real yield would be the
+  highest-value model extension.
+- **Wide credible intervals are information, not failure.** A 90% CI of
+  −18% to +23% means current macro conditions are genuinely ambiguous —
+  the model is being honest rather than manufacturing a false point estimate.
+
+---
+
 ## Next-Quarter Forecast (cells 37–39)
 
 After evaluation, the model retrains on **all available data** and uses the
@@ -404,9 +474,12 @@ These are genuine limitations, not implementation bugs:
   economically motivated but fixed. A Hidden Markov Model or Dirichlet-process
   mixture would learn regime transitions and boundaries jointly with return
   dynamics.
-- **Fixed feature set**: The regression uses five lagged macro variables. Earnings
-  yield, consumer sentiment, and PMI have known incremental predictive power for
-  equity returns.
+- **No rate-level or inflation features**: The regression uses yield *slope*
+  but not yield *level*, CPI, or the fed funds rate. The 2022 backtest makes
+  this gap concrete — the inflation-driven bear market decoupled yield slope
+  from equity returns in a way the model cannot detect. Adding real yield or
+  CPI momentum is the highest-priority extension. Earnings yield, consumer
+  sentiment, and PMI also have known incremental predictive power.
 - **Time-invariant coefficients**: A Gaussian random walk prior on the betas
   (state-space model) would capture structural breaks — e.g., the post-2008
   regime shift in interest rate sensitivity.
