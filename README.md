@@ -24,9 +24,10 @@ likelihood) is retained solely as a benchmark to validate that the
 hierarchical structure earns its complexity — if it did not outperform a
 simpler flat model, the regime design would need revisiting.
 
-Both are evaluated on a **21-quarter out-of-sample walk-forward test
-(2019 Q1 – 2024 Q1)**, spanning a full market cycle including the COVID
-crash, the 2022 bear market, and the 2023 recovery.
+Both are evaluated on a **29-quarter out-of-sample walk-forward test
+(2019 Q1 – 2026 Q1)**, spanning a full market cycle including the COVID
+crash, the 2022 bear market, the 2023–2024 recovery, and the 2025–2026
+period.
 
 ---
 
@@ -228,17 +229,17 @@ The model is evaluated using a strict expanding-window walk-forward approach:
 5. Add quarter *t+1* to the training set and repeat.
 
 **Train/test split: `train_end_year = 2018`** (~73 training quarters,
-21 test quarters: 2019 Q1 – 2024 Q1).
+29 test quarters: 2019 Q1 – 2026 Q1).
 
 The split year was chosen to ensure each regime has enough training observations
 for meaningful partial pooling while leaving a demanding test period. Cutting at
 2018 includes the 2008–2009 GFC, the 2011 European debt crisis, and the 2018 Q4
 volatility spike in the training set — enough recessionary and transitional
 quarters for the regime-specific parameters to be data-identified rather than
-driven entirely by the hyperpriors. The 21-quarter test period then covers the
+driven entirely by the hyperpriors. The 29-quarter test period then covers the
 COVID crash (2020 Q1), the low-volatility 2021 bull run, the 2022
-inflation-driven bear market, and the 2023–2024 recovery — a genuine stress test
-spanning all three yield-curve regimes.
+inflation-driven bear market, the 2023–2024 recovery, and 2025–2026 — a genuine
+stress test spanning all three yield-curve regimes.
 
 ---
 
@@ -295,6 +296,14 @@ confidence and **severely penalises overconfident wrong predictions**.
 - **Perfect = 0**
 - Lower is better
 
+Observed values across the 29-quarter test period:
+
+| Metric | Flat model | Hierarchical model |
+|---|---|---|
+| Brier Score | 0.7061 | **0.6887** |
+| Brier Skill Score | 0.0586 | **0.0817** |
+| Log Score | 1.2929 | **1.2666** |
+
 See **cell 34** for the side-by-side table of all three metrics for both models.
 
 > *Plain English: if the model says "90% chance of a strong quarter" and it
@@ -310,6 +319,19 @@ The regime-stratified breakdown shows accuracy and Brier Score separately for
 Recessionary, Transitional, and Expansionary quarters. This is where the
 hierarchical model should visibly outperform the flat model — it learns
 different behaviour per regime rather than averaging everything together.
+
+Observed results for the hierarchical model (29-quarter test, 2019–2026):
+
+| Regime | N quarters | Accuracy | Brier Score | BSS |
+|---|---|---|---|---|
+| Recessionary (<0%) | 8 | 38% | 0.6483 | 0.136 |
+| Transitional (0–1%) | 18 | 39% | 0.7102 | 0.053 |
+| Expansionary (≥1%) | 3 | 33% | 0.6675 | 0.110 |
+
+The hierarchical model shows its strongest advantage in Recessionary regimes
+(BSS 0.136 vs ≈0.06 overall), consistent with the design intent: regime-specific
+tail and scale parameters allow the model to assign more probability mass to
+extreme outcomes when the yield curve is inverted.
 
 ---
 
@@ -343,7 +365,7 @@ After the backtest, cell 36 produces a two-panel dashboard that answers the
 practical question: *at what confidence threshold should I act on the model's
 top-bucket call?*
 
-- **Panel 1 — Per-quarter confidence bars**: each of the 21 test quarters is
+- **Panel 1 — Per-quarter confidence bars**: each of the 29 test quarters is
   shown as a bar coloured green (model's top bucket was correct) or red
   (wrong), with height proportional to the model's confidence in that call.
 - **Panel 2 — Hit rate vs confidence threshold**: a table and chart showing
@@ -374,17 +396,21 @@ decision tool. The real signal is conditional on model confidence.
 The backtest dashboard (bottom panel) shows hit rate rises sharply with
 the model's confidence in its top-bucket call:
 
-| Confidence ≥ | Hit rate | # Signals |
-|---|---|---|
-| 25% (all quarters) | 38% | 29 |
-| 40% | ~60% | ~10 |
-| 50% | ~60% | ~7 |
-| 70%+ | 100% | 1–2 |
+| Confidence ≥ | Hit rate | # Signals | Coverage |
+|---|---|---|---|
+| 25% (all quarters) | 38% | 29 | 100% |
+| 30% | 37% | 27 | 93% |
+| 35% | 32% | 19 | 66% |
+| 40% | 50% | 12 | 41% |
+| 45% | 60% | 10 | 34% |
+| 50% | 57% | 7 | 24% |
 
-**When the model commits above ~40% confidence, it is right roughly 60% of
+**When the model commits above ~45% confidence, it is right roughly 60% of
 the time — well above the 25% random floor.** Those high-confidence quarters
-are rare; most quarters sit in the 30–45% range where the model is
-effectively communicating genuine uncertainty rather than a clear signal.
+are rare (roughly 1-in-3 test quarters); most quarters sit in the 25–40%
+range where the model is effectively communicating genuine uncertainty rather
+than a clear signal. The ≥40% threshold is the practical entry point where
+accuracy first breaks above 50%.
 
 ### Best calls
 
@@ -413,8 +439,9 @@ no feature to detect.
 This model is best used as **one probabilistic input** in a broader
 decision process, not as an autonomous signal. Actionable guidance:
 
-- **Act on the model when confidence is ≥40%** — that is where the signal
-  is. Below that the model is expressing honest uncertainty, not a forecast.
+- **Act on the model when confidence is ≥40–45%** — accuracy breaks 50% at
+  ≥40% and peaks around 60% at ≥45%. Below 40% the model is expressing
+  honest uncertainty, not a clear directional forecast.
 - **Cross-check with inflation / rate-level context.** The yield slope alone
   mis-classifies regimes when rate *levels* are the dominant equity driver
   (e.g., 2022). Adding CPI, the fed funds rate, or real yield would be the
@@ -449,6 +476,23 @@ most recent quarter's macro readings to forecast the next quarter.
 
 The retraining cell (~5 min on first run, instant on cache hit) is cell 37;
 the chart and plain-English output are in cells 38–39.
+
+**Most recent forecast — 2026 Q1** (as of last cached run):
+
+| | |
+|---|---|
+| Regime | Transitional (10Y–2Y spread: +0.58%) |
+| Strong positive (>+5%) | 30% |
+| Mildly positive (0–+5%) | 22% |
+| Mildly negative (−5–0%) | 23% |
+| Significant drop (<−5%) | 26% |
+| 90% credible interval | −18% to +23% |
+
+The near-uniform distribution across all four buckets reflects the Transitional
+regime: with the yield curve flat but slightly positive, the model has no strong
+macro signal and reports genuine uncertainty rather than a directional view. The
+top model confidence (30%) falls below the ≥40% action threshold, so this is
+a "no strong signal" quarter.
 
 ### Print-Ready Forecast Report (cell 40)
 
