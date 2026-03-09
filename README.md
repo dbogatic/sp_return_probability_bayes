@@ -24,7 +24,7 @@ likelihood) is retained solely as a benchmark to validate that the
 hierarchical structure earns its complexity — if it did not outperform a
 simpler flat model, the regime design would need revisiting.
 
-Both are evaluated on a **29-quarter out-of-sample walk-forward test
+Both are evaluated on an **out-of-sample walk-forward test of up to 29 quarters
 (2019 Q1 – 2026 Q1)**, spanning a full market cycle including the COVID
 crash, the 2022 bear market, the 2023–2024 recovery, and the 2025–2026
 period.
@@ -236,7 +236,7 @@ for meaningful partial pooling while leaving a demanding test period. Cutting at
 2018 includes the 2008–2009 GFC, the 2011 European debt crisis, and the 2018 Q4
 volatility spike in the training set — enough recessionary and transitional
 quarters for the regime-specific parameters to be data-identified rather than
-driven entirely by the hyperpriors. The 29-quarter test period then covers the
+driven entirely by the hyperpriors. The test period then covers the
 COVID crash (2020 Q1), the low-volatility 2021 bull run, the 2022
 inflation-driven bear market, the 2023–2024 recovery, and 2025–2026 — a genuine
 stress test spanning all three yield-curve regimes.
@@ -245,7 +245,7 @@ stress test spanning all three yield-curve regimes.
 
 ## Out-of-Sample Accuracy
 
-Both models are evaluated on **29 quarters (2019 Q1 – 2026 Q1)** that were
+Both models are evaluated on **up to 29 quarters (2019 Q1 – 2026 Q1)** that were
 never seen during training. Three complementary metrics are computed in
 **cells 33–35**.
 
@@ -296,7 +296,7 @@ confidence and **severely penalises overconfident wrong predictions**.
 - **Perfect = 0**
 - Lower is better
 
-Observed values across the 29-quarter test period:
+Observed values across the test period (up to 29 quarters):
 
 | Metric | Flat model | Hierarchical model |
 |---|---|---|
@@ -320,7 +320,7 @@ Recessionary, Transitional, and Expansionary quarters. This is where the
 hierarchical model should visibly outperform the flat model — it learns
 different behaviour per regime rather than averaging everything together.
 
-Observed results for the hierarchical model (29-quarter test, 2019–2026):
+Observed results for the hierarchical model (up to 29-quarter test, 2019–2026):
 
 | Regime | N quarters | Accuracy | Brier Score | BSS |
 |---|---|---|---|---|
@@ -346,16 +346,20 @@ computed using only past quarters. No future information ever leaks in.
 The walk-forward loop resamples MCMC for every test quarter, which takes
 roughly 70 minutes. Results are cached to disk automatically:
 
-- **`backtest_results_YYYYMMDD.csv`** — walk-forward predictions and
-  probabilities, keyed by the last date in FRED data. If the file exists,
-  cell 30 skips the MCMC loop entirely.
-- **`trace_full_YYYYMMDD.nc`** — the full-data posterior trace used for
-  forecasting, also keyed by last data date. Cell 37 loads it instantly on
-  subsequent runs instead of resampling.
+- **`backtest_results_flat_YYYYMMDD.csv`** — flat model walk-forward
+  predictions, keyed by the last test date. If the file exists, cell 14
+  skips the MCMC loop entirely.
+- **`backtest_results_monthly_YYYYMMDD.csv`** — hierarchical model
+  walk-forward predictions and probabilities, keyed by the last date in
+  FRED data. If the file exists, cell 30 skips the MCMC loop entirely.
+- **`trace_full_monthly_YYYYMMDD.nc`** — the full-data posterior trace used
+  for forecasting, also keyed by last data date. Cell 38 loads it instantly
+  on subsequent runs instead of resampling.
 
-Both caches invalidate automatically when a new quarter of FRED data becomes
-available (the date in the filename changes), so reruns after a data refresh
-always retrain from scratch.
+All caches invalidate automatically when new FRED data arrives (the date in
+the filename changes), so reruns after a data refresh always retrain from
+scratch. Old cache files with stale dates can be deleted manually to free
+disk space.
 
 ---
 
@@ -377,7 +381,7 @@ The dashboard is saved as **`backtest_dashboard.png`**.
 
 ---
 
-## Practical Assessment (29-quarter backtest, 2019 Q1 – 2026 Q1)
+## Practical Assessment (walk-forward backtest, 2019 Q1 – 2026 Q1)
 
 ### Overall accuracy
 
