@@ -94,34 +94,27 @@ The **Student-t distribution** with degrees of freedom `nu` accommodates this:
 lower `nu` → heavier tails → more probability mass on extreme events. This is
 the statistically correct model for equity returns.
 
-### 5. Degrees-of-freedom prior — floor at nu = 4
+### 5. Degrees-of-freedom — fixed at nu = 7
 
-The prior on `nu` is:
+The hierarchical model fixes `nu = 7` for all three regimes (controlled by
+`NU_FIXED = 7` in the config cell). This is a deliberate departure from
+estimating nu per regime:
 
-```
-nu ~ Exponential(lam=1/20) + 4
-```
-
-The **floor at 4** is a deliberate modeling constraint. Here is the rationale:
-
-| nu range | Consequence | Assessment |
+| nu value | Tail heaviness | Rationale |
 |---|---|---|
-| nu < 2 | Infinite variance | Statistically pathological; rejected |
-| 2 ≤ nu < 4 | Infinite kurtosis | Implies extreme events every few quarters — too aggressive even for financial markets |
-| 4 ≤ nu ≤ 15 | Finite variance and kurtosis, heavy tails | Consistent with empirical estimates for quarterly equity returns |
-| nu > 30 | Approaches Normal distribution | Appropriate for calm regimes |
+| nu < 4 | Infinite kurtosis | Too aggressive; rejected |
+| **nu = 7** | **Moderate fat tails** | **95th-percentile monthly event ≈ 3σ; consistent with empirical equity data** |
+| nu > 30 | Approaches Normal | Underestimates tail risk |
 
-The tension we are resolving: black swans are real and happen more often than
-the Normal distribution implies — but they still should not happen *every few
-quarters*. The floor at 4 encodes that constraint while keeping the tails
-genuinely heavy. The Exponential shift puts the bulk of the prior in the
-[4, 30] range, consistent with empirical estimates in the financial
-econometrics literature.
+**Why fix rather than estimate?** With ~80 observations per regime, the
+posterior on `nu` is essentially the prior — HDIs span [0, 58], providing no
+useful information. Estimating three unidentified parameters adds noise to the
+NUTS sampler without improving predictions. Fixing at 7 removes the source of
+sampling pathology and is consistent with empirical estimates for monthly
+equity returns in the financial econometrics literature.
 
-In the hierarchical model, `nu` is **regime-specific** — the recessionary
-regime is expected to learn a lower `nu` (heavier tails) than the expansionary
-regime, capturing the empirical finding that tail risk is not constant across
-market environments.
+To revert to estimated regime-specific nu, set `NU_FIXED = None` in the
+config cell. The model definition handles both cases via a single `if` branch.
 
 ### 6. Prior on regression coefficients — weakly informative
 
@@ -372,19 +365,21 @@ The walk-forward loop resamples MCMC for every test month, which is
 computationally intensive. Results are cached to disk automatically:
 
 - **`backtest_results_flat_YYYYMMDD.csv`** — flat model walk-forward
-  predictions, keyed by the last test date. If the file exists, the cell
-  skips the MCMC loop entirely.
-- **`backtest_results_monthly_YYYYMMDD.csv`** — hierarchical model
-  walk-forward predictions and probabilities, keyed by the last date in
-  FRED data. If the file exists, the cell skips the MCMC loop entirely.
+  predictions, keyed by the last test date.
+- **`backtest_results_monthly_YYYYMMDD_dD_tT_cC_taNNN_rfR.csv`** —
+  hierarchical model walk-forward predictions; keyed by last FRED date,
+  draws (`d`), tune (`t`), chains (`c`), target_accept×100 (`ta`), and
+  refit frequency (`rf`). Changing any sampler setting auto-invalidates the
+  cache.
+- **`variant_LABEL_YYYYMMDD_dD_tT_taNNN.json`** — one file per structural
+  variant (A_baseline / B_fixed_nu7 / C_loose / D_fixed_nu7_loose) from
+  the model-comparison cell. Keyed by date, sampler settings, and
+  target_accept.
 - **`trace_full_monthly_YYYYMMDD.nc`** — the full-data posterior trace used
-  for forecasting, also keyed by last data date. The forecast cell loads it
-  instantly on subsequent runs instead of resampling.
+  for forecasting, keyed by last data date.
 
-All caches invalidate automatically when new FRED data arrives (the date in
-the filename changes), so reruns after a data refresh always retrain from
-scratch. Old cache files with stale dates can be deleted manually to free
-disk space.
+All caches invalidate automatically when new FRED data arrives or when
+sampler settings change. Old files can be deleted manually to free disk space.
 
 ---
 
