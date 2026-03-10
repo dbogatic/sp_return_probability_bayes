@@ -94,27 +94,38 @@ The **Student-t distribution** with degrees of freedom `nu` accommodates this:
 lower `nu` → heavier tails → more probability mass on extreme events. This is
 the statistically correct model for equity returns.
 
-### 5. Degrees-of-freedom — fixed at nu = 7
+### 5. Degrees-of-freedom — estimated per regime
 
-The hierarchical model fixes `nu = 7` for all three regimes (controlled by
-`NU_FIXED = 7` in the config cell). This is a deliberate departure from
-estimating nu per regime:
+The hierarchical model estimates `nu` independently per regime via:
 
-| nu value | Tail heaviness | Rationale |
-|---|---|---|
-| nu < 4 | Infinite kurtosis | Too aggressive; rejected |
-| **nu = 7** | **Moderate fat tails** | **95th-percentile monthly event ≈ 3σ; consistent with empirical equity data** |
-| nu > 30 | Approaches Normal | Underestimates tail risk |
+```
+nu_h[k] ~ Exponential(lam=1/20) + 4    (floor at 4)
+```
 
-**Why fix rather than estimate?** With ~80 observations per regime, the
-posterior on `nu` is essentially the prior — HDIs span [0, 58], providing no
-useful information. Estimating three unidentified parameters adds noise to the
-NUTS sampler without improving predictions. Fixing at 7 removes the source of
-sampling pathology and is consistent with empirical estimates for monthly
-equity returns in the financial econometrics literature.
+The floor at 4 ensures finite kurtosis. The Exponential(1/20) prior puts most
+mass below ~30, consistent with the empirical range for equity returns, while
+allowing heavy tails (nu near 4) when the data supports it.
 
-To revert to estimated regime-specific nu, set `NU_FIXED = None` in the
-config cell. The model definition handles both cases via a single `if` branch.
+**nu = 7 was tested as a fixed benchmark** — controlled by `NU_FIXED` in the
+config cell — via two ablation variants in the model-comparison cell:
+
+| Variant | NU_FIXED | σ_α prior | σ_β prior |
+|---|---|---|---|
+| A_baseline ◄ | None (estimated per regime) | 0.03 | 0.02 |
+| B_fixed_nu7 | 7 | 0.03 | 0.02 |
+| C_loose | None (estimated per regime) | 0.10 | 0.05 |
+| D_fixed_nu7_loose | 7 | 0.10 | 0.05 |
+
+`A_baseline` (estimated nu, tight pooling) achieved the best log score across
+the 21-quarter single-pass evaluation, so `NU_FIXED = None` is the production
+setting. The nu=7 variants serve purely as benchmarks in the comparison cell.
+
+**Why estimate rather than fix?** With ~80 observations per regime there is
+enough data to identify a per-regime nu when pooling priors are tight and the
+non-centered parameterization keeps the sampler geometry well-conditioned.
+Fixing at 7 is a sensible fallback if divergences reappear — set `NU_FIXED = 7`
+in the config cell to revert. Both paths are handled by a single `if` branch in
+the model definition.
 
 ### 6. Prior on regression coefficients — weakly informative
 
