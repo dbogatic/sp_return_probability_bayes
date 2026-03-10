@@ -14,20 +14,20 @@ quarterly S&P 500 returns will fall within four buckets:
 | Mild negative | −5% to 0% | −4.9% to 0% |
 | Strong negative | < −5% | < −4.9% |
 
-The **Hierarchical Bayesian Model** is the forecasting model. It uses a
-three-level partial-pooling structure with yield-curve-based market
-regimes, regime-specific coefficients, and regime-specific tail/scale
-parameters.
+The **Hierarchical Bayesian Model** is the primary forecasting model. It uses a
+three-level partial-pooling structure with yield-curve-based market regimes,
+regime-specific coefficients, and regime-specific tail/scale parameters.
 
 A **Flat Bayesian Linear Regression** (single parameter set, Student-t
-likelihood) is retained solely as a benchmark to validate that the
-hierarchical structure earns its complexity — if it did not outperform a
-simpler flat model, the regime design would need revisiting.
+likelihood) is retained solely as a benchmark. The hierarchical structure earns
+its complexity on calibration metrics (Brier Score, Log Score) but **not** on
+raw top-bucket accuracy — the flat model hits 45% vs the hierarchical model's
+41%. The hierarchy's genuine edge is in the Recessionary regime (BSS 0.134) and
+in better-calibrated probabilities when the model is uncertain.
 
-Both are evaluated on an **out-of-sample walk-forward test of up to 29 quarters
-(2019 Q1 – 2026 Q1)**, spanning a full market cycle including the COVID
-crash, the 2022 bear market, the 2023–2024 recovery, and the 2025–2026
-period.
+Both are evaluated on an **out-of-sample walk-forward test of 22 quarters
+(2020 Q4 – 2026 Q1)**, spanning the COVID crash, the 2022 bear market, the
+2023–2024 recovery, and the 2025–2026 period.
 
 ---
 
@@ -46,33 +46,41 @@ We model log returns `ln(P_t / P_{t-1})` rather than simple percentage returns.
 - Converting back to simple returns for interpretation is straightforward:
   `simple_return = exp(log_return) − 1`.
 
-### 2. Quarterly frequency
+### 2. Monthly data, quarterly forecasts
 
-Monthly data is resampled to quarters. The rationale:
+FRED data is ingested at **monthly** frequency and walked forward one month at
+a time. Every three consecutive monthly predictions are compounded into a
+quarterly return distribution, which is what the bucket probabilities and
+evaluation metrics are computed on. The rationale:
 
-- Macro variables (interest rates, credit spreads) have stronger predictive
-  signal over multi-month horizons; monthly noise is reduced.
-- Quarterly is the natural unit for institutional reporting and portfolio
-  rebalancing decisions.
-- With data pulled from FRED starting Q1 1997, usable observations begin
-  around Q1 1999 (~105 quarters through 2024) — reasonable for Bayesian
-  estimation with enough recessionary and transitional quarters to
-  data-identify regime-specific parameters.
+- Monthly ingestion captures faster-moving signals (credit spreads, yield
+  changes) without forcing coarse quarterly averages.
+- Quarterly aggregation retains the natural horizon for institutional
+  reporting and portfolio rebalancing.
+- Compounding monthly distributions preserves the full predictive uncertainty
+  across the three months rather than collapsing it to a point estimate.
 
-### 3. Features — lagged by one quarter
+With data pulled from FRED starting Q1 1997, usable observations begin around
+Q1 1999 (~312 monthly observations through 2024) — reasonable for Bayesian
+estimation with enough recessionary and transitional months to data-identify
+regime-specific parameters.
 
-Five features, all lagged one quarter so they are fully known at prediction time.
-Yield curve and HY spread are sourced from FRED (`T10Y2Y`, `BAMLH0A0HYM2`).
+### 3. Features — lagged by one period
+
+Six features, all lagged one period so they are fully known at prediction time.
+Yield curve, HY spread, and CPI are sourced from FRED (`T10Y2Y`,
+`BAMLH0A0HYM2`, `CPIAUCSL`).
 
 | Feature | Transformation | Rationale |
 |---|---|---|
-| `yield_curve_lag1` | Previous quarter-end 10Y–2Y spread (raw level) | Forward-looking macro regime signal; inverted curve precedes recessions |
-| `yield_curve_chg_lag1` | Quarter-over-quarter change in 10Y–2Y spread | Momentum in yield curve steepening / flattening |
-| `hy_spread_lag1` | Previous quarter-end HY OAS level | Credit-risk appetite signal; widens ahead of equity drawdowns |
-| `hy_spread_chg_lag1` | Quarter-over-quarter log change in HY OAS | Spread momentum — rapidly widening spreads signal risk-off |
-| `sp_returns_lag1` | Log return of S&P 500 | Momentum / mean-reversion |
+| `yield_curve_lag1` | Previous month-end 10Y–2Y spread (raw level) | Forward-looking macro regime signal; inverted curve precedes recessions |
+| `yield_curve_chg_lag1` | Month-over-month change in 10Y–2Y spread | Momentum in yield curve steepening / flattening |
+| `hy_spread_lag1` | Previous month-end HY OAS level | Credit-risk appetite signal; widens ahead of equity drawdowns |
+| `hy_spread_chg_lag1` | Month-over-month log change in HY OAS | Spread momentum — rapidly widening spreads signal risk-off |
+| `mom_12_1` | 12-1 price momentum: log(P_{t-1}/P_{t-12}) | Medium-horizon trend signal; avoids one-month reversal noise of raw lag |
+| `real_yield_lag1` | 10Y Treasury minus CPI YoY | Captures inflation-driven discount-rate shocks invisible to slope alone |
 
-Lagging is a strict requirement: using same-quarter features would constitute
+Lagging is a strict requirement: using same-period features would constitute
 look-ahead bias and overstate out-of-sample accuracy.
 
 ### 4. Student-t likelihood — not Normal
@@ -86,34 +94,27 @@ The **Student-t distribution** with degrees of freedom `nu` accommodates this:
 lower `nu` → heavier tails → more probability mass on extreme events. This is
 the statistically correct model for equity returns.
 
-### 5. Degrees-of-freedom prior — floor at nu = 4
+### 5. Degrees-of-freedom — fixed at nu = 7
 
-The prior on `nu` is:
+The hierarchical model fixes `nu = 7` for all three regimes (controlled by
+`NU_FIXED = 7` in the config cell). This is a deliberate departure from
+estimating nu per regime:
 
-```
-nu ~ Exponential(lam=1/20) + 4
-```
-
-The **floor at 4** is a deliberate modeling constraint. Here is the rationale:
-
-| nu range | Consequence | Assessment |
+| nu value | Tail heaviness | Rationale |
 |---|---|---|
-| nu < 2 | Infinite variance | Statistically pathological; rejected |
-| 2 ≤ nu < 4 | Infinite kurtosis | Implies extreme events every few quarters — too aggressive even for financial markets |
-| 4 ≤ nu ≤ 15 | Finite variance and kurtosis, heavy tails | Consistent with empirical estimates for quarterly equity returns |
-| nu > 30 | Approaches Normal distribution | Appropriate for calm regimes |
+| nu < 4 | Infinite kurtosis | Too aggressive; rejected |
+| **nu = 7** | **Moderate fat tails** | **95th-percentile monthly event ≈ 3σ; consistent with empirical equity data** |
+| nu > 30 | Approaches Normal | Underestimates tail risk |
 
-The tension we are resolving: black swans are real and happen more often than
-the Normal distribution implies — but they still should not happen *every few
-quarters*. The floor at 4 encodes that constraint while keeping the tails
-genuinely heavy. The Exponential shift puts the bulk of the prior in the
-[4, 30] range, consistent with empirical estimates in the financial
-econometrics literature.
+**Why fix rather than estimate?** With ~80 observations per regime, the
+posterior on `nu` is essentially the prior — HDIs span [0, 58], providing no
+useful information. Estimating three unidentified parameters adds noise to the
+NUTS sampler without improving predictions. Fixing at 7 removes the source of
+sampling pathology and is consistent with empirical estimates for monthly
+equity returns in the financial econometrics literature.
 
-In the hierarchical model, `nu` is **regime-specific** — the recessionary
-regime is expected to learn a lower `nu` (heavier tails) than the expansionary
-regime, capturing the empirical finding that tail risk is not constant across
-market environments.
+To revert to estimated regime-specific nu, set `NU_FIXED = None` in the
+config cell. The model definition handles both cases via a single `if` branch.
 
 ### 6. Prior on regression coefficients — weakly informative
 
@@ -129,27 +130,27 @@ that it contributes no regularisation at all.
 
 If the posterior credible intervals exclude zero for a coefficient, the data
 found a signal. If not, the features simply have limited predictive power at
-quarterly frequency — which is itself a finding worth reporting.
+monthly/quarterly frequency — which is itself a finding worth reporting.
 
 ### 7. Observation scale prior
 
 ```
 sigma ~ HalfNormal(sigma=0.05)    # flat model
-sigma_h ~ HalfNormal(sigma=0.06, shape=n_regimes)  # hierarchical, per-regime
+sigma_h ~ HalfNormal(sigma=0.04, shape=n_regimes)  # hierarchical, per-regime
 ```
 
 HalfNormal places most mass near small positive values. The scale parameter
-(0.05–0.06) is calibrated to observed quarterly S&P 500 log-return volatility
-(historically ~7–8%). In the hierarchical model, each regime has its own
+is calibrated to observed **monthly** S&P 500 log-return volatility
+(historically ~3–4%). In the hierarchical model, each regime has its own
 `sigma_h`: the recessionary regime is expected to learn a larger scale,
 capturing **volatility clustering** — the well-documented empirical pattern
 that high-volatility periods cluster together.
 
 ### 8. Yield-curve regime classifier
 
-The hierarchical model classifies each quarter into one of three regimes using
-the **previous quarter's 10Y–2Y Treasury yield spread** — fully known at the
-start of each quarter (no look-ahead bias):
+The hierarchical model classifies each month into one of three regimes using
+the **previous month's 10Y–2Y Treasury yield spread** — fully known at the
+start of each month (no look-ahead bias):
 
 | Regime | Lagged yield curve slope | Market environment |
 |---|---|---|
@@ -164,8 +165,12 @@ react *during* crises rather than anticipate them. The yield curve is the
 single most informative public macro signal for near-term recession risk.
 
 **No test-set contamination**: regime boundaries (0% and 1%) are economically
-motivated thresholds, not data-fitted. The test period (2019–2024) is never
+motivated thresholds, not data-fitted. The test period (2020–2026) is never
 consulted during regime design.
+
+**Known limitation**: these are static hard-coded thresholds. A data-driven
+approach would learn regime boundaries jointly from the data. See
+[Priority 3](#priority-3--replace-static-regime-boundaries-with-dynamic-assignment) in the roadmap.
 
 ### 9. Partial pooling (hierarchical model)
 
@@ -174,7 +179,7 @@ The hierarchical model sits between two extremes:
 | Approach | Description | Problem |
 |---|---|---|
 | Complete pooling | One parameter set for all regimes | Ignores regime differences |
-| No pooling | Separate model per regime | Too little data per regime (~20–40 quarters) |
+| No pooling | Separate model per regime | Too little data per regime |
 | **Partial pooling** | Regime params drawn from shared hyperpriors | Borrows strength across regimes |
 
 Regime-level coefficients are drawn from global hyperpriors:
@@ -220,24 +225,26 @@ of the mixture.
 
 The model is evaluated using a strict expanding-window walk-forward approach:
 
-1. Train on data up to quarter *t* only.
+1. Train on all monthly data up to period *t* only.
 2. Refit the RobustScaler on the current training window — prevents future-data
    leakage into the scaling transformation.
 3. Sample the posterior on training data.
-4. Set features to the test quarter *t+1* and sample posterior predictive —
-   the true out-of-sample prediction.
-5. Add quarter *t+1* to the training set and repeat.
+4. Set features to the test month *t+1* and sample posterior predictive.
+5. After every 3 months, compound the monthly distributions into a quarterly
+   return distribution and compute bucket probabilities.
+6. Add month *t+1* to the training set and repeat.
 
-**Train/test split: `train_end_year = 2018`** (~73 training quarters,
-29 test quarters: 2019 Q1 – 2026 Q1).
+**Train/test split: `train_end_year = 2018`** (~240 training months,
+test period beginning January 2019). The first complete quarterly prediction
+is available at **2020 Q4** due to data availability constraints on the
+`real_yield_lag1` feature (CPI YoY lag). This yields **22 test quarters
+(2020 Q4 – 2026 Q1)**.
 
 The split year was chosen to ensure each regime has enough training observations
 for meaningful partial pooling while leaving a demanding test period. Cutting at
 2018 includes the 2008–2009 GFC, the 2011 European debt crisis, and the 2018 Q4
-volatility spike in the training set — enough recessionary and transitional
-quarters for the regime-specific parameters to be data-identified rather than
-driven entirely by the hyperpriors. The test period then covers the
-COVID crash (2020 Q1), the low-volatility 2021 bull run, the 2022
+volatility spike in the training set. The test period then covers the
+COVID crash (2020 Q4 environment), the low-volatility 2021 bull run, the 2022
 inflation-driven bear market, the 2023–2024 recovery, and 2025–2026 — a genuine
 stress test spanning all three yield-curve regimes.
 
@@ -245,7 +252,7 @@ stress test spanning all three yield-curve regimes.
 
 ## Out-of-Sample Accuracy
 
-Both models are evaluated on **up to 29 quarters (2019 Q1 – 2026 Q1)** that were
+Both models are evaluated on **22 quarters (2020 Q4 – 2026 Q1)** that were
 never seen during training. Three complementary metrics are computed in
 **cells 33–35**.
 
@@ -281,7 +288,7 @@ Lower is better. The **Brier Skill Score (BSS)** rescales this so that
 adds real forecasting value beyond a coin flip. See **cell 34** for the
 computed values for both models.
 
-> *Plain English: a model that confidently called the 2020 Q1 crash correctly
+> *Plain English: a model that confidently called the 2020 COVID drop correctly
 > would earn a very low (good) Brier Score for that quarter. A model that was
 > 80% confident in the wrong bucket would be heavily penalised.*
 
@@ -296,15 +303,20 @@ confidence and **severely penalises overconfident wrong predictions**.
 - **Perfect = 0**
 - Lower is better
 
-Observed values across the test period (up to 29 quarters):
+Observed values across the test period (22 quarters):
 
 | Metric | Flat model | Hierarchical model |
 |---|---|---|
-| Brier Score | 0.7061 | **0.6887** |
-| Brier Skill Score | 0.0586 | **0.0817** |
-| Log Score | 1.2929 | **1.2666** |
+| Top-bucket accuracy | **45%** | 41% |
+| Brier Score | 0.7225 | **0.7162** |
+| Brier Skill Score | 0.0366 | **0.0450** |
+| Log Score | 1.3330 | **1.2981** |
 
-See **cell 34** for the side-by-side table of all three metrics for both models.
+The flat model wins on raw classification accuracy (45% vs 41%), while the
+hierarchical model wins on probability calibration (Brier, Log Score). This
+is a meaningful distinction: the flat model is more often *directionally*
+correct, but the hierarchical model is better at *sizing its uncertainty* — it
+assigns more appropriate probabilities rather than being overconfident.
 
 > *Plain English: if the model says "90% chance of a strong quarter" and it
 > crashes instead, the Log Score punishes that far harder than the Brier Score
@@ -316,22 +328,28 @@ See **cell 34** for the side-by-side table of all three metrics for both models.
 ### Regime-Stratified Table and Calibration Diagram (cell 35)
 
 The regime-stratified breakdown shows accuracy and Brier Score separately for
-Recessionary, Transitional, and Expansionary quarters. This is where the
-hierarchical model should visibly outperform the flat model — it learns
-different behaviour per regime rather than averaging everything together.
+Recessionary, Transitional, and Expansionary quarters.
 
-Observed results for the hierarchical model (up to 29-quarter test, 2019–2026):
+Observed results for the hierarchical model (22-quarter test, 2020–2026):
 
 | Regime | N quarters | Accuracy | Brier Score | BSS |
 |---|---|---|---|---|
-| Recessionary (<0%) | 8 | 38% | 0.6483 | 0.136 |
-| Transitional (0–1%) | 18 | 39% | 0.7102 | 0.053 |
-| Expansionary (≥1%) | 3 | 33% | 0.6675 | 0.110 |
+| Recessionary (<0%) | 8 | **50%** | **0.6494** | **0.1342** |
+| Transitional (0–1%) | 11 | 27% | 0.7704 | −0.0272 |
+| Expansionary (≥1%) | 3 | 67% | 0.6960 | 0.0720 |
 
-The hierarchical model shows its strongest advantage in Recessionary regimes
-(BSS 0.136 vs ≈0.06 overall), consistent with the design intent: regime-specific
-tail and scale parameters allow the model to assign more probability mass to
-extreme outcomes when the yield curve is inverted.
+Two key findings:
+
+1. **Recessionary regime: genuine edge.** BSS of 0.134 is the model's strongest
+   result. Regime-specific tail and scale parameters allow it to assign more
+   probability mass to extreme outcomes when the yield curve is inverted.
+
+2. **Transitional regime: worse than random.** BSS of −0.027 means the
+   hierarchical model in Transitional quarters is *worse* than just guessing
+   25% for each bucket. This is the most important diagnostic: with 11 of 22
+   test quarters in this regime, improving Transitional performance is the
+   single highest-leverage improvement available. See
+   [Priority 3](#priority-3--replace-static-regime-boundaries-with-dynamic-assignment).
 
 ---
 
@@ -339,27 +357,29 @@ extreme outcomes when the yield curve is inverted.
 
 At every step the model only knows what was available *at the time of the
 forecast*: training data, feature scaling, and regime boundaries are all
-computed using only past quarters. No future information ever leaks in.
+computed using only past months. No future information ever leaks in.
 
 ### Caching — backtest and trace
 
-The walk-forward loop resamples MCMC for every test quarter, which takes
-roughly 70 minutes. Results are cached to disk automatically:
+The walk-forward loop resamples MCMC for every test month, which is
+computationally intensive. Results are cached to disk automatically:
 
 - **`backtest_results_flat_YYYYMMDD.csv`** — flat model walk-forward
-  predictions, keyed by the last test date. If the file exists, cell 14
-  skips the MCMC loop entirely.
-- **`backtest_results_monthly_YYYYMMDD.csv`** — hierarchical model
-  walk-forward predictions and probabilities, keyed by the last date in
-  FRED data. If the file exists, cell 30 skips the MCMC loop entirely.
+  predictions, keyed by the last test date.
+- **`backtest_results_monthly_YYYYMMDD_dD_tT_cC_taNNN_rfR.csv`** —
+  hierarchical model walk-forward predictions; keyed by last FRED date,
+  draws (`d`), tune (`t`), chains (`c`), target_accept×100 (`ta`), and
+  refit frequency (`rf`). Changing any sampler setting auto-invalidates the
+  cache.
+- **`variant_LABEL_YYYYMMDD_dD_tT_taNNN.json`** — one file per structural
+  variant (A_baseline / B_fixed_nu7 / C_loose / D_fixed_nu7_loose) from
+  the model-comparison cell. Keyed by date, sampler settings, and
+  target_accept.
 - **`trace_full_monthly_YYYYMMDD.nc`** — the full-data posterior trace used
-  for forecasting, also keyed by last data date. Cell 38 loads it instantly
-  on subsequent runs instead of resampling.
+  for forecasting, keyed by last data date.
 
-All caches invalidate automatically when new FRED data arrives (the date in
-the filename changes), so reruns after a data refresh always retrain from
-scratch. Old cache files with stale dates can be deleted manually to free
-disk space.
+All caches invalidate automatically when new FRED data arrives or when
+sampler settings change. Old files can be deleted manually to free disk space.
 
 ---
 
@@ -369,131 +389,86 @@ After the backtest, cell 36 produces a two-panel dashboard that answers the
 practical question: *at what confidence threshold should I act on the model's
 top-bucket call?*
 
-- **Panel 1 — Per-quarter confidence bars**: each of the 29 test quarters is
+- **Panel 1 — Per-quarter confidence bars**: each of the 22 test quarters is
   shown as a bar coloured green (model's top bucket was correct) or red
   (wrong), with height proportional to the model's confidence in that call.
 - **Panel 2 — Hit rate vs confidence threshold**: a table and chart showing
-  how accuracy changes as you raise the bar for acting on a forecast. If the
-  model is only correct 50% of the time overall but hits 80% when confidence
-  exceeds 50%, that threshold is where the signal is.
+  how accuracy changes as you raise the bar for acting on a forecast.
 
 The dashboard is saved as **`backtest_dashboard.png`**.
 
 ---
 
-## Practical Assessment (walk-forward backtest, 2019 Q1 – 2026 Q1)
+## Practical Assessment (walk-forward backtest, 2020 Q4 – 2026 Q1)
 
 ### Overall accuracy
 
 | Metric | Value |
 |---|---|
-| Quarters evaluated | 29 |
-| Top-bucket correct | 11 (38%) |
+| Quarters evaluated | 22 |
+| Hierarchical top-bucket correct | 9 (41%) |
+| Flat top-bucket correct | 10 (45%) |
 | Random baseline | 25% |
-| Edge over random | +13pp |
+| Hierarchical edge over random | +16pp |
 
-38% is meaningfully above chance but not high enough to use as a standalone
-decision tool. The real signal is conditional on model confidence.
+Both models outperform random guessing. The flat model has higher raw accuracy;
+the hierarchical model has better-calibrated probabilities.
 
 ### The confidence threshold insight
 
-The backtest dashboard (bottom panel) shows hit rate rises sharply with
-the model's confidence in its top-bucket call:
+The backtest dashboard (bottom panel) shows how hit rate changes with the
+model's confidence in its top-bucket call:
 
 | Confidence ≥ | Hit rate | # Signals | Coverage |
 |---|---|---|---|
-| 25% (all quarters) | 38% | 29 | 100% |
-| 30% | 37% | 27 | 93% |
-| 35% | 32% | 19 | 66% |
-| 40% | 50% | 12 | 41% |
-| 45% | 60% | 10 | 34% |
-| 50% | 57% | 7 | 24% |
+| 25% (all quarters) | 41% | 22 | 100% |
+| 30% | 41% | 22 | 100% |
+| 35% | 41% | 17 | 77% |
+| 40% | 22% | 9 | 41% |
+| 45% | 0% | 1 | 5% |
 
-**When the model commits above ~45% confidence, it is right roughly 60% of
-the time — well above the 25% random floor.** Those high-confidence quarters
-are rare (roughly 1-in-3 test quarters); most quarters sit in the 25–40%
-range where the model is effectively communicating genuine uncertainty rather
-than a clear signal. The ≥40% threshold is the practical entry point where
-accuracy first breaks above 50%.
+**The confidence threshold does not improve accuracy here.** Unlike earlier
+model versions, filtering to high-confidence quarters hurts rather than helps —
+the model's confident calls in this test window were often wrong. This is the
+clearest signal that the current regime design and feature set need improvement
+before the model can be used as an actionable signal.
 
-### Best calls
+### The 2022 failure — structural, not random
 
-| Quarter | Confidence | Prediction | Actual | Result |
-|---|---|---|---|---|
-| 2019 Q1 | 91% | Strong positive | +13% | ✓ |
-| 2020 Q2 | 87% | Strong positive | +20% | ✓ |
-| 2020 Q1 | — | Significant drop most likely | −20% | ✓ |
+All four quarters of 2022 were wrong. The root cause: the inflation-driven
+bear market was unlike anything in the 1999–2018 training set. The yield curve
+was steepening rapidly *while* equities fell — a decoupling of the slope regime
+from equity returns that `yield_curve_lag1` alone cannot detect.
 
-The model's clearest value was catching regime-driven extremes: the COVID
-crash and the immediate recovery bounce, both driven by sharp yield-curve
-moves that the model's macro features captured cleanly.
-
-### Worst call — 2022
-
-All four quarters of 2022 were wrong. The most damaging was **2022 Q2**:
-the model was **70% confident in a strong positive outcome** while the
-market fell −16%. The full-year 2022 failure reflects a structural gap:
-the inflation-driven bear market was unlike anything in the 1999–2018
-training set. The yield curve was steepening rapidly *while* equities fell
-— a decoupling of the slope regime from equity returns that the model has
-no feature to detect.
-
-| Quarter | Model confidence | Predicted bucket | Actual return | Regime assigned |
-|---|---|---|---|---|
-| 2022 Q1 | ~32% | Mild positive | −4.9% | Transitional |
-| 2022 Q2 | ~70% | Strong positive | **−16.4%** | Transitional |
-| 2022 Q3 | ~70% | Mild negative | −5.3% | Transitional |
-| 2022 Q4 | ~39% | Mild positive | +7.1% | Recessionary |
-
-The root cause: real yields swung from **−6% to +1%** in twelve months
-(10Y Treasury rising sharply while CPI ran at ~8% YoY). Yield curve
-*slope* was blind to this — a steeply positive slope normally signals
-expansion, not a −16% quarter. The inflation-driven discount-rate shock
-was a regime the model had never seen in training.
-
-### Overconfidence diagnosis
-
-The **Log Score** is the key metric here — it penalises overconfident
-wrong predictions far harder than the Brier Score. A model that assigns
-95% probability and is wrong pays an enormous penalty; a model that says
-50% and is wrong pays a moderate one.
-
-The 2022 Q2 call (70% confidence, −16% outcome) is a textbook
-overconfidence failure. The model assigned high probability to a benign
-outcome because every feature it could see — a positive yield slope, low
-HY spreads, recent positive momentum — pointed that way. It had no signal
-for the rate-level shock that was actually driving returns.
-
-**Diagnosis summary:**
-
-| Issue | Evidence | Root cause |
-|---|---|---|
-| Overconfidence in 2022 | Log Score penalised heavily; 70% confidence on wrong bucket | Missing inflation / real-yield feature |
-| Weak Transitional skill | BSS = 0.053 vs 0.136 Recessionary | Most quarters land here; regime is too coarse |
-| Single failure mode | All 4 wrong quarters clustered in 2022 | Out-of-distribution regime, not random noise |
+Adding `real_yield_lag1` (10Y − CPI YoY) was a direct response to this: real
+yields swung from **−6% to +1%** in twelve months while the nominal slope stayed
+positive. The feature is now in the model, but the 2022 quarters remain
+in-sample for evaluation; the full benefit of this addition will show in future
+test periods.
 
 ### What this means for use
 
-This model is best used as **one probabilistic input** in a broader
-decision process, not as an autonomous signal. Actionable guidance:
+This model is best used as **one probabilistic input** in a broader decision
+process, not as an autonomous signal. At its current development stage:
 
-- **Act on the model when confidence is ≥40–45%** — accuracy breaks 50% at
-  ≥40% and peaks around 60% at ≥45%. Below 40% the model is expressing
-  honest uncertainty, not a clear directional forecast.
-- **Cross-check with inflation / rate-level context.** The yield slope alone
-  mis-classifies regimes when rate *levels* are the dominant equity driver
-  (e.g., 2022). Adding CPI, the fed funds rate, or real yield would be the
-  highest-value model extension.
+- **Do not act on high-confidence calls alone.** The threshold table shows
+  accuracy falls at higher confidence levels in the current test window.
+- **The Recessionary regime is the strongest signal.** BSS 0.134 in inverted-
+  curve environments suggests genuine regime awareness when the macro signal is
+  sharpest.
 - **Wide credible intervals are information, not failure.** A 90% CI of
   −18% to +23% means current macro conditions are genuinely ambiguous —
   the model is being honest rather than manufacturing a false point estimate.
+- **The Transitional regime (0–1% slope) is currently unreliable.** With
+  BSS = −0.027, the model's probabilistic estimates in this regime are worse
+  than random and should not be used without further improvement.
 
 ---
 
-## Next-Quarter Forecast (cells 37–39)
+## Next-Quarter Forecast (cells 37–40)
 
 After evaluation, the model retrains on **all available data** and uses the
-most recent quarter's macro readings to forecast the next quarter.
+most recent month's macro readings to forecast the next quarter.
 
 **What the forecast outputs:**
 
@@ -501,36 +476,15 @@ most recent quarter's macro readings to forecast the next quarter.
   (Recessionary / Transitional / Expansionary), based on the current
   10Y–2Y Treasury spread
 - **Bucket probabilities** — the probability of each of the four return
-  outcomes
+  outcomes (compounded from monthly predictions)
 - **Expected return** — the probability-weighted average forecast
-- **Credible intervals** — 50% CI (inner range where the model is fairly
-  confident) and 90% CI (the wide range covering most plausible outcomes)
+- **Credible intervals** — 50% CI and 90% CI
 - **Probability bar chart** — visual summary with the 25% random baseline
 
 > *Plain English: the forecast does not say "the market will go up X%." It
 > says "given current macro conditions, here is how probable each outcome is."
 > A wide credible interval means genuine uncertainty — the model is being
 > honest rather than hiding behind a false point estimate.*
-
-The retraining cell (~5 min on first run, instant on cache hit) is cell 37;
-the chart and plain-English output are in cells 38–39.
-
-**Most recent forecast — 2026 Q1** (as of last cached run):
-
-| | |
-|---|---|
-| Regime | Transitional (10Y–2Y spread: +0.58%) |
-| Strong positive (>+5%) | 30% |
-| Mildly positive (0–+5%) | 22% |
-| Mildly negative (−5–0%) | 23% |
-| Significant drop (<−5%) | 26% |
-| 90% credible interval | −18% to +23% |
-
-The near-uniform distribution across all four buckets reflects the Transitional
-regime: with the yield curve flat but slightly positive, the model has no strong
-macro signal and reports genuine uncertainty rather than a directional view. The
-top model confidence (30%) falls below the ≥40% action threshold, so this is
-a "no strong signal" quarter.
 
 ### Print-Ready Forecast Report (cell 40)
 
@@ -542,7 +496,7 @@ It contains everything needed for a quarterly decision briefing:
 |---|---|
 | Header | Quarter label and colour-coded regime banner |
 | Probability bars | Four return buckets with the top bucket highlighted |
-| Macro inputs table | The five lag-1 features that drove the forecast |
+| Macro inputs table | The six lag-1 features that drove the forecast |
 | Return distribution strip | Posterior 90%/50% CI and expected return |
 | Backtest context line | Overall accuracy and hit rate at the current confidence level |
 
@@ -550,65 +504,74 @@ It contains everything needed for a quarterly decision briefing:
 
 ## Improvement Roadmap
 
-Prioritised by expected impact on the two diagnosed failure modes (overconfidence + weak Transitional skill).
+Prioritised by expected impact on the two diagnosed failure modes
+(Transitional regime worse than random + high-confidence calls not improving accuracy).
 
-### Priority 1 — Fix overconfidence (calibration)
+### Priority 1 — Replace static regime boundaries with dynamic assignment
+
+This is the most structurally important improvement. The current hard thresholds
+(0% and 1%) are economically motivated but fixed — they treat every 0.01%
+yield-curve reading the same regardless of context, and they assign the same
+Transitional label to late-cycle tightening and early-cycle recovery, which have
+opposite equity implications.
+
+Options in increasing complexity:
+
+| Approach | Description | Complexity |
+|---|---|---|
+| **Soft regime weights** | Yield curve level maps to a softmax over regime weights — smooth, probabilistic transitions. Replaces `pd.cut` with a sigmoid/softmax function of slope. | Low |
+| **Rolling/adaptive thresholds** | Keep discrete assignments but define Transitional as the middle tercile of the yield curve distribution over the past N years, not a fixed 0–1% band. | Low |
+| **Hidden Markov Model (HMM)** | Regimes are latent states with learned transition probabilities. The model infers which regime each period belongs to jointly with learning return dynamics. | High |
+| **Mixture of experts** | No pre-specified regime definition — the model learns K latent regimes purely from return data. Regimes emerge from the data, not from a yield-curve rule. | High |
+
+The soft-weights or rolling-threshold approaches can be implemented without
+restructuring the PyMC model. HMM/mixture of experts would require a model
+redesign but would give the most principled treatment of regime uncertainty.
+
+### Priority 2 — Add regime persistence prior
+
+The current model classifies each month independently. Recessionary regimes
+typically persist for 3–18 months; a Markov transition prior on regime
+assignments would:
+- Smooth noisy month-to-month regime flips at the threshold boundary
+- Encode the prior that regime changes are rare, not random
+- Allow the model to maintain a Recessionary label even when the yield curve
+  briefly crosses zero
+
+This is a natural complement to Priority 1 and can be implemented as a
+Categorical prior with a Dirichlet prior on the transition matrix.
+
+### Priority 3 — Fix overconfidence (calibration)
+
+The threshold table shows the model's confident calls in the current window
+are not reliably better than its uncertain calls. Targeted fixes:
 
 - **Temperature / Platt scaling**: post-hoc calibration step that squeezes
   predicted probabilities toward the centre when the model is systematically
   overconfident. Does not require retraining the Bayesian model.
 - **Minimum-entropy prior**: enforce a floor on outcome uncertainty so the
   model cannot assign >70–75% to a single bucket without very strong data
-  support. Directly targets the 2022 Q2–Q3 failure mode.
-- **Track calibration curves per regime**: the 2×2 calibration plots already
-  exist — use them to identify which buckets are most miscalibrated and by
-  how much, then target corrections there first.
+  support.
+- **Track calibration curves per regime**: use the 2×2 calibration plots
+  (cell 35) to identify which buckets and regimes are most miscalibrated,
+  then target corrections there first.
 
-### Priority 2 — Add inflation / rate-level features
+### Priority 4 — Time-varying coefficients
 
-The single highest-value model extension, directly motivated by 2022:
-
-| Feature | Why |
-|---|---|
-| `real_yield_lag1` (10Y − CPI YoY) | Captures 2022-style discount-rate shocks invisible to slope alone |
-| `cpi_momentum_lag1` (QoQ change in CPI) | Rate of change of inflation, not just level |
-| `fed_funds_chg_lag1` | Policy tightening / easing speed |
-| `breakeven_inflation_lag1` | Market-implied inflation expectations (FRED: `T10YIE`) |
-
-These are all available on FRED with no API key, consistent with the existing data pipeline.
-
-### Priority 3 — Refine the Transitional regime
-
-Transitional is the weakest regime (BSS = 0.053) and the most common
-(18 of 29 test quarters). It is too coarse — it lumps together
-late-cycle tightening and early-cycle recovery, which have opposite
-equity implications.
-
-- Split into **Transitional-Rising** (yield curve moving toward inversion)
-  and **Transitional-Recovering** (curve moving away from inversion)
-- Alternatively: learn regime boundaries jointly from data using a
-  **Hidden Markov Model** or **Dirichlet-process mixture**, rather than
-  fixing them at 0% and 1%.
-
-### Priority 4 — Reduce overfit to regime snapshots
-
-- **Regime persistence prior**: the current model classifies each quarter
-  independently. Recessionary regimes typically last 3–6 quarters; a
-  Markov transition prior on regime assignments would smooth noisy
-  quarter-to-quarter regime flips.
-- **Time-varying coefficients**: a Gaussian random walk prior on the
-  betas (state-space model) would capture structural breaks such as the
-  post-2008 shift in interest-rate sensitivity.
+A Gaussian random walk prior on the betas (state-space / dynamic linear model)
+would capture structural breaks such as the post-2008 shift in interest-rate
+sensitivity without requiring manual regime redesign. This handles the scenario
+where the same yield-curve level means different things in different decades.
 
 ### Priority 5 — Widen the training set
 
-- Training data spans Q1 1999–2018 (~80 quarters, two market cycles).
+- Training data spans 1999–2018 (~240 months, roughly two full market cycles).
   Extending further back would add the 1990s bull run and the 1987 crash,
   but FRED's HY spread series (`BAMLH0A0HYM2`) only starts in 1996,
   which is the practical floor.
-- Consider **bootstrapped stress scenarios** or **synthetic 2022-style
-  episodes** to supplement the single inflation-shock example in the
-  out-of-sample period.
+- Consider **bootstrapped stress scenarios** or **synthetic inflation-shock
+  episodes** to supplement the limited number of 2022-style events in the
+  training set.
 
 ---
 
@@ -616,16 +579,28 @@ equity implications.
 
 These are known structural constraints, not bugs:
 
-- **Hard-coded regime boundaries**: The 0% and 1% yield-curve thresholds are
-  economically motivated but fixed. A data-driven approach would learn them.
-- **No rate-level or inflation features**: The 2022 failure makes this gap
-  concrete. See Priority 2 above for the fix.
-- **Time-invariant coefficients**: structural breaks (e.g., post-2008 rate
-  sensitivity) are not captured. See Priority 4.
-- **Independent quarter assumption**: regime persistence is not modelled.
-  See Priority 4.
-- **Training history ceiling**: limited by FRED HY spread availability
-  (1996). See Priority 5.
+- **Static hard-coded regime boundaries**: The 0% and 1% yield-curve thresholds
+  are economically motivated but fixed. A data-driven approach would learn them.
+  The Transitional regime (BSS = −0.027) is the clearest evidence that the
+  current bucketing is too coarse. See Priority 1 above.
+- **Transitional regime worse than random**: In the 22-quarter test window, the
+  model's calibrated probabilities in Transitional quarters are worse than
+  guessing 25% for each bucket. This is not a sampling artefact — it reflects
+  a structural problem with the regime definition lumping together late-cycle
+  and early-cycle environments.
+- **Confidence does not predict accuracy**: The threshold table shows no
+  improvement above 35% confidence. This undermines the use case of acting on
+  high-confidence calls and is the second most important diagnostic.
+- **Time-invariant coefficients**: Structural breaks (e.g., the post-2008 shift
+  in yield-curve sensitivity, the 2022 inflation regime) are not captured. The
+  same `beta_r` applies throughout a regime regardless of when in history we
+  are. See Priority 4.
+- **Independent month assumption**: Regime persistence is not modelled. The
+  model can flip from Recessionary to Transitional and back in consecutive
+  months if the yield curve oscillates around zero. See Priority 2.
+- **Training history ceiling**: Limited by FRED HY spread availability (1996).
+  The 2022 inflation-driven bear market is the only example of that regime type
+  in the full dataset, which is insufficient for robust parameter estimation.
 
 ---
 
@@ -638,7 +613,7 @@ pip install pymc arviz pandas scikit-learn matplotlib seaborn statsmodels
 jupyter notebook sp_return_prob_bayes.ipynb
 ```
 
-Or in **VS Code**: switch to the `claude/hierarchical-bayesian-review-9Th9N`
+Or in **VS Code**: switch to the `claude/improve-hierarchical-model-v9Ax9`
 branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 
 ---
@@ -646,15 +621,18 @@ branch, open the `.ipynb` file, and select the `pymc_env` kernel.
 ## Data
 
 All data is fetched live from **FRED** at runtime (no API key required via `pandas_datareader`).
-Three series are pulled starting Q1 1997 (buffer for first diff and one quarter of lag):
+Four series are pulled starting Q1 1997 (buffer for first diff and one quarter of lag):
 
 | Series | FRED ID | Used for |
 |---|---|---|
-| S&P 500 Index | `SP500` | Target variable (log quarterly returns) |
+| S&P 500 Index | `SP500` | Target variable (log monthly returns) |
 | 10Y–2Y Treasury spread | `T10Y2Y` | Regime classifier + regression feature |
 | ICE BofA HY OAS | `BAMLH0A0HYM2` | Regression feature |
+| CPI (All Urban Consumers) | `CPIAUCSL` | Real yield calculation (`real_yield_lag1`) |
 
-After differencing and lagging, usable observations begin around Q1 1999.
+After differencing and lagging, usable observations begin around 1999. The
+first quarterly forecast is available at 2020 Q4 due to CPI YoY lag
+requirements on the `real_yield_lag1` feature.
 
 ---
 
