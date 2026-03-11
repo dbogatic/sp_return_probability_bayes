@@ -1,0 +1,8 @@
+pymc
+arviz
+pandas
+scikit-learn
+matplotlib
+seaborn
+statsmodels
+pandas_datareader
