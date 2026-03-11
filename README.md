@@ -11,6 +11,18 @@ model failure.
 
 ---
 
+## Intended Use
+
+The model is designed to:
+
+- Quantify macro-conditioned return risk distributions
+- Evaluate probabilistic equity scenarios across yield-curve environments
+- Support research and exploratory analysis of macro-driven return dynamics
+
+It should not be interpreted as a deterministic market timing signal.
+
+---
+
 ## Return Buckets
 
 | Bucket | Return Range |
